@@ -212,3 +212,33 @@ from the TypeSpec contract in `typespec/` with one command
 pipeline is documented in the superseded
 [ADR-0003](docs/adr/0003-openapi-code-first-ng-openapi-gen.md).
 
+## AI agent
+
+The repo runs the [OpenCode](https://opencode.ai) agent as a **GitHub App** (the
+`anomalyco/opencode/github` action, pinned to a SHA) rather than a self-hosted
+agent: the App is installed on the repository and the workflow exchanges a fresh
+OIDC token for a short-lived App token, so the repo's own `GITHUB_TOKEN` stays
+read-only. The alternative — a standalone agent daemon watching the repo — would
+run outside GitHub Actions with its own long-lived credentials and scheduler;
+the App keeps the trigger, the permissions and the run history inside the repo's
+Actions tab instead.
+
+The command workflow is
+[`.github/workflows/opencode.yml`](.github/workflows/opencode.yml). It runs on
+`issue_comment` and `pull_request_review_comment`, each limited to
+`types: [created]`, and starts only when a trusted participant (owner or
+collaborator) comments `/oc` or `/opencode` on an issue, a pull request, or a
+line of a pull request's diff. Bot comments are ignored, and the workflow's own
+token cannot write. The model is `opencode-go/deepseek-v4.1-flash`; the API key
+lives in the `OPENCODE_API_KEY` repository secret. The run posts the agent's
+answer as a comment (and, for a line comment, moves it into that line's thread).
+A companion workflow,
+[`.github/workflows/opencode-review.yml`](.github/workflows/opencode-review.yml),
+reviews each non-draft PR authored by the owner or the agent bot.
+
+Agent sessions are **not shared**: both workflows set `share: "false"` so a run's
+transcript is never published (the action would otherwise share it by default on
+a public repo). The skills and GitHub Issues conventions the agent follows live
+in `.agents/skills/` and `docs/agents/`; the repo-specific commands it may run
+are documented in [AGENTS.md](AGENTS.md).
+
