@@ -2,7 +2,9 @@ name: pr-title
 
 on:
   pull_request:
-    types: [opened, edited, reopened, synchronize]
+    # `synchronize` (a push to the PR) never changes the title, so it is
+    # omitted — only open/edit/reopen matter for title linting.
+    types: [opened, edited, reopened]
 
 permissions:
   contents: read

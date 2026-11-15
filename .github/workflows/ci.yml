@@ -1,7 +1,14 @@
 name: ci
 
 on:
-  push: # every push, any branch
+  push:
+    # Branches only — never tags. A bare `push:` matches both, so every
+    # release-please tag re-ran this workflow on a commit already built on dev.
+    # The negative pattern also skips release-please's own version-bump branch;
+    # the merge into dev is the real gate and still runs here.
+    branches:
+      - '**'
+      - '!release-please--**'
   workflow_dispatch:
 
 permissions:
