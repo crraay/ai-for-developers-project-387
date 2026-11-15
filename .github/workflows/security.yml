@@ -7,8 +7,9 @@ name: security
 #
 #   exit 0   -> clean         (packages scanned, no vulnerabilities)
 #   exit 1   -> findings      (vulnerabilities)          -> the agent triages
-#   exit 128 -> no-packages   (no lockfile was recognized)
+#   exit 128 -> no-packages   (no lockfile recognized)   -> job fails
 #   other    -> scanner-error (127 general error, 129+ non-result error, etc.)
+#                              -> job fails
 #
 # The audit is independent of todo-fixme-audit.yml: a different concurrency
 # group, a different artifact name, and a different schedule, so the two audits
@@ -125,7 +126,26 @@ jobs:
 
       # The agent triages findings: cross-reference existing issues, file one
       # per untracked vulnerability. It runs only when there are findings — a
-      # clean, no-packages or scanner-error run just saves the artifact.
+      # clean run just saves the artifact.
+      #
+      # A scanner error or a "no packages" result means the audit did not do its
+      # job (the scanner crashed/errored, or failed to recognise the lockfiles
+      # this repo has). Those must not end green: fail the job with a distinct
+      # message, so a broken weekly audit is visible on the checks tab, not
+      # hidden behind a green tick and an artifact. The upload step still runs
+      # afterwards because it is gated on `!cancelled()`, not `success()`.
+      - name: Fail on a broken audit
+        if: ${{ steps.classify.outputs.outcome == 'scanner-error' || steps.classify.outputs.outcome == 'no-packages' }}
+        run: |
+          set -euo pipefail
+          outcome="$(cat .osv-audit/outcome)"
+          if [ "$outcome" = "scanner-error" ]; then
+            echo "::error::OSV-Scanner failed (exit $(cat .osv-audit/exit-code)); see the uploaded artifact." >&2
+          else
+            echo "::error::OSV-Scanner found no lockfiles to scan; see the uploaded artifact." >&2
+          fi
+          exit 1
+
       - name: Install opencode
         if: ${{ steps.classify.outputs.outcome == 'findings' }}
         run: |
@@ -170,6 +190,8 @@ jobs:
                 "gh search issues *": "allow",
                 "gh issue create": "allow",
                 "gh issue create *": "allow",
+                "*$*": "deny",
+                "*`*": "deny",
                 "*>*": "deny",
                 "*<*": "deny"
               }
