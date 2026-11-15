@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.1](https://github.com/crraay/ai-for-developers-project-387/compare/v0.4.0...v0.4.1) (2026-11-15)
+
+
+### Bug Fixes
+
+* **deploy:** deploy the workflow's selected branch via commitId ([2c2455a](https://github.com/crraay/ai-for-developers-project-387/commit/2c2455ab82ec940215baacd6487e1166994c3e69))
+* **deploy:** deploy the workflow's selected branch via commitId ([9677ff2](https://github.com/crraay/ai-for-developers-project-387/commit/9677ff2f99c4706144c52eb1d2b075109753cc5f)), closes [#20](https://github.com/crraay/ai-for-developers-project-387/issues/20)
+
 ## [0.4.0](https://github.com/crraay/ai-for-developers-project-386/compare/v0.3.0...v0.4.0) (2026-11-15)
 
 
