@@ -47,9 +47,18 @@ concurrency:
 
 jobs:
   opencode:
-    # Bot comments are ignored so the agent cannot answer itself in a loop.
+    # Bot comments are ignored so the agent cannot answer itself in a loop, and
+    # only a comment from an owner or collaborator starts a run. This gate is a
+    # cheap first check on author_association that skips obviously untrusted
+    # commenters — forks, first-timers, contributors without repo access —
+    # before checkout, so no secret reaches a runner for them. It is defense in
+    # depth, not the authority: the OpenCode action still calls
+    # getCollaboratorPermissionLevel and refuses anyone without admin or write
+    # access.
     if: |
       github.event.comment.user.type == 'User' &&
+      (github.event.comment.author_association == 'OWNER' ||
+       github.event.comment.author_association == 'COLLABORATOR') &&
       (contains(github.event.comment.body, '/oc') ||
        contains(github.event.comment.body, '/opencode'))
     runs-on: ubuntu-latest
@@ -103,6 +112,9 @@ jobs:
         with:
           model: opencode-go/deepseek-v4.1-flash
           mentions: /oc,/opencode
+          # The action shares the session by default on a public repo; turn it
+          # off so agent transcripts are never published.
+          share: "false"
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           # Anything that would prompt is denied: `ask` cannot be answered on a
