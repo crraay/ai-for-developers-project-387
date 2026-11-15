@@ -9,12 +9,14 @@ name: opencode
 # design: they run in the context of the default branch with the job's secrets
 # and token, and anyone who can comment can start them. Both carry the comment,
 # so the finding is accepted with one scoped, expiring exception in
-# .github/jactionlint.yaml. The mitigations live here: GITHUB_TOKEN cannot
-# write (the boundary step reads with it), the model key is read only by the
-# agent step, and the OpenCode action refuses actors without admin or write
-# access before it checks out the PR head, so only a trusted actor can put PR
-# code in front of the agent. The last step exchanges a fresh OIDC token for
-# the App token because the action revokes its own in `finally`.
+# .github/jactionlint.yaml. The mitigations live here: the trigger is gated to
+# a comment from the repository owner, the job's GITHUB_TOKEN cannot write (the
+# boundary step reads with it), and the model key is read only by the agent
+# step. A write-capable token — the OpenCode App token, exchanged over OIDC
+# before the agent runs — is handed to the agent as GH_TOKEN, so it can apply
+# labels, file and close issues, push branches and open pull requests, while
+# the workflow's own token stays read-only. The last step exchanges a fresh
+# OIDC token for the App token because the action revokes its own in `finally`.
 #
 # A comment on a code line is a message in that line's thread, not in the PR
 # conversation. The pinned action already gives the agent the file, line and
@@ -48,17 +50,16 @@ concurrency:
 jobs:
   opencode:
     # Bot comments are ignored so the agent cannot answer itself in a loop, and
-    # only a comment from an owner or collaborator starts a run. This gate is a
-    # cheap first check on author_association that skips obviously untrusted
-    # commenters — forks, first-timers, contributors without repo access —
-    # before checkout, so no secret reaches a runner for them. It is defense in
-    # depth, not the authority: the OpenCode action still calls
-    # getCollaboratorPermissionLevel and refuses anyone without admin or write
-    # access.
+    # only a comment from the repository owner starts a run. Matching the
+    # commenter's login to github.repository_owner is stricter and more exact
+    # than author_association: a collaborator's comment no longer runs the
+    # agent, so the write-capable App token below only ever runs for the
+    # owner's own command. The check happens before checkout, so no secret
+    # reaches a runner for anyone else. The OpenCode action still calls
+    # getCollaboratorPermissionLevel as a second, independent gate.
     if: |
       github.event.comment.user.type == 'User' &&
-      (github.event.comment.author_association == 'OWNER' ||
-       github.event.comment.author_association == 'COLLABORATOR') &&
+      github.event.comment.user.login == github.repository_owner &&
       (contains(github.event.comment.body, '/oc') ||
        contains(github.event.comment.body, '/opencode'))
     runs-on: ubuntu-latest
@@ -103,9 +104,41 @@ jobs:
           last=$(gh api --paginate "repos/$REPO/issues/$PR/comments" --jq '.[].id' | sort -n | tail -n 1)
           printf '%s\n' "${last:-0}" > "$tmp/comment-boundary"
 
-      # The App token from the OIDC exchange carries contents/issues/
-      # pull-requests write; this workflow's GITHUB_TOKEN stays read-only, and
-      # the action refuses actors without admin or write access to the repo.
+      # A write-capable token for the agent's own gh/git calls. It is the same
+      # OpenCode App token the action exchanges for itself, obtained here before
+      # the agent runs so the agent can apply labels, file and close issues,
+      # push branches and open pull requests. The job's GITHUB_TOKEN stays
+      # read-only, and the token is masked and short-lived. `continue-on-error`
+      # degrades a failed exchange to an unauthenticated (read-only) agent
+      # instead of stopping the run with no answer.
+      - name: Exchange App token for the agent
+        id: app-token
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          oidc_url="${ACTIONS_ID_TOKEN_REQUEST_URL:-}"
+          oidc_request_token="${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}"
+          if [ -z "$oidc_url" ] || [ -z "$oidc_request_token" ]; then
+            echo "::error::OIDC is not available; id-token: write is required."
+            exit 1
+          fi
+          oidc=$(curl -fsS \
+            -H "Authorization: bearer $oidc_request_token" \
+            "$oidc_url&audience=opencode-github-action" | jq -r .value)
+          if [ -z "$oidc" ] || [ "$oidc" = null ]; then
+            echo "::error::OIDC token request failed."
+            exit 1
+          fi
+          app=$(curl -fsS -X POST \
+            -H "Authorization: Bearer $oidc" \
+            https://api.opencode.ai/exchange_github_app_token | jq -r .token)
+          if [ -z "$app" ] || [ "$app" = null ]; then
+            echo "::error::OpenCode App token exchange failed."
+            exit 1
+          fi
+          echo "::add-mask::$app"
+          echo "app-token=$app" >> "$GITHUB_OUTPUT"
+
       - name: Run OpenCode
         id: agent
         uses: anomalyco/opencode/github@77fc88c8ade8e5a620ebbe1197f3a572d29ae91a # latest, 2026-11-13
@@ -117,10 +150,47 @@ jobs:
           share: "false"
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          # The write-capable App token exchanged above. Naming it GH_TOKEN is
+          # what makes gh and git pick it up; the action's own OIDC path reads
+          # GITHUB_TOKEN (and only when use_github_token is true), so this does
+          # not change how the action posts the answer.
+          GH_TOKEN: ${{ steps.app-token.outputs.app-token }}
           # Anything that would prompt is denied: `ask` cannot be answered on a
-          # runner. Shape is opencode's V1 `permission` object (the 1.19.x
-          # binary the action installs), merged over opencode.json.
-          OPENCODE_PERMISSION: '{"external_directory":"deny","question":"deny"}'
+          # runner. The web, subagents, the TODO tool and anything outside the
+          # checkout are denied, and shell access is limited to git and gh with
+          # no redirects or command chaining — the agent reads attacker-authored
+          # issue bodies and PR diffs, so a write token must not be usable to
+          # run arbitrary commands. Shape is opencode's V1
+          # `permission` object (the 1.19.x binary the action installs), merged
+          # over opencode.json; the last matching key wins, so the wildcard
+          # comes first and the guards come last.
+          OPENCODE_PERMISSION: |
+            {
+              "edit": "allow",
+              "write": "allow",
+              "read": {
+                "*": "allow",
+                "*.env": "deny",
+                "*.env.*": "deny"
+              },
+              "external_directory": "deny",
+              "question": "deny",
+              "task": "deny",
+              "todowrite": "deny",
+              "webfetch": "deny",
+              "websearch": "deny",
+              "bash": {
+                "*": "deny",
+                "git *": "allow",
+                "gh *": "allow",
+                "*>*": "deny",
+                "*<*": "deny",
+                "*--output*": "deny",
+                "*--no-index*": "deny",
+                "*;*": "deny",
+                "*&&*": "deny"
+              }
+            }
 
       # Move the answer into the line's thread. A reply needs a write-capable
       # token, and the job's GITHUB_TOKEN stays read-only, so exchange a fresh

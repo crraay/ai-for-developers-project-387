@@ -12,8 +12,9 @@ ignores:
     file: .github/workflows/opencode.yml
     reason: >-
       issue_comment and pull_request_review_comment are the triggers that carry
-      the /oc comment; the workflow's own token cannot write, and the action
-      checks that the actor has admin or write access to the repository.
+      the /oc comment; the trigger is gated to the repository owner, the
+      workflow's own GITHUB_TOKEN cannot write, and the write-capable OpenCode
+      App token is exchanged over OIDC and handed to the agent as GH_TOKEN.
     expires: "2027-05-13"
   # The audit workflow installs the opencode CLI with the same
   # `curl -fsSL https://opencode.ai/install | bash` that the pinned
