@@ -131,7 +131,7 @@ function HostPage() {
   }
 
   return (
-    <section className="page">
+    <section className={`page ${styles.wide}`}>
       <h2>Upcoming bookings</h2>
       <p>
         <Link to="/host/booking-types">Manage booking types</Link>
@@ -223,14 +223,22 @@ function HostPage() {
                       key={booking.id}
                       className={booking.state === 'cancelled' ? styles.cancelled : undefined}
                     >
-                      <td>{formatDate(booking.start)}</td>
-                      <td>{formatTimeRange(booking.start, booking.end)}</td>
-                      <td>{durationLabel(booking.start, booking.end)}</td>
-                      <td>{typeTitle(booking.bookingTypeId)}</td>
+                      <td className={styles.nowrap}>{formatDate(booking.start)}</td>
+                      <td className={styles.nowrap}>
+                        {formatTimeRange(booking.start, booking.end)}
+                      </td>
+                      <td className={styles.nowrap}>{durationLabel(booking.start, booking.end)}</td>
+                      <td className={styles.nowrap}>{typeTitle(booking.bookingTypeId)}</td>
                       <td>{booking.guestName}</td>
                       <td>{booking.guestEmail}</td>
-                      <td>{booking.state === 'active' ? 'Confirmed' : 'Cancelled'}</td>
-                      <td>
+                      <td className={styles.nowrap}>
+                        {booking.state === 'active' ? (
+                          'Confirmed'
+                        ) : (
+                          <span className={styles.statusCancelled}>Cancelled</span>
+                        )}
+                      </td>
+                      <td className={styles.nowrap}>
                         {canCancelRow(booking) && (
                           <button
                             type="button"
