@@ -63,7 +63,7 @@ jobs:
       (contains(github.event.comment.body, '/oc') ||
        contains(github.event.comment.body, '/opencode'))
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45 # mise install + setup + check + model time on implement runs
     permissions:
       contents: read # checkout of this repository
       id-token: write # OIDC exchange for the OpenCode App token
@@ -83,6 +83,14 @@ jobs:
       # opencode 1.19.5 binary the action installs).
       - name: Provide the local config's secret file placeholder
         run: touch .render-api-key
+
+      # Install the pinned toolchain (Java 25, node 24, the lint tools) so the
+      # agent can run `mise run check` and friends when it implements. The only
+      # build entry the whitelist below grants is `mise run`, which executes
+      # tasks defined in mise.toml — never an arbitrary command. Cached, so a
+      # triage/to-spec run pays only a cache hit.
+      - name: Install the pinned toolchain
+        uses: jdx/mise-action@6612f0ef07ed2a736cd1e00a94a065522dd41195 # v5.2.5
 
       # The action answers a review comment as a top-level PR comment: at the
       # pinned SHA `createComment` calls `issues.createComment`, not
@@ -157,10 +165,13 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.app-token }}
           # Anything that would prompt is denied: `ask` cannot be answered on a
           # runner. The web, subagents, the TODO tool and anything outside the
-          # checkout are denied, and shell access is limited to git and gh with
-          # no redirects or command chaining — the agent reads attacker-authored
-          # issue bodies and PR diffs, so a write token must not be usable to
-          # run arbitrary commands. Shape is opencode's V1
+          # checkout are denied, and shell access is limited to git, gh and the
+          # pinned build tasks (`mise run`) with no redirects or command
+          # chaining — the agent reads attacker-authored issue bodies and PR
+          # diffs, so a write token must not be usable to run arbitrary
+          # commands. `mise run` only executes tasks defined in mise.toml;
+          # `mise exec`/`mise x`, bare `npm`/`gradlew` and everything else stay
+          # denied. Shape is opencode's V1
           # `permission` object (the 1.19.x binary the action installs), merged
           # over opencode.json; the last matching key wins, so the wildcard
           # comes first and the guards come last.
@@ -183,6 +194,7 @@ jobs:
                 "*": "deny",
                 "git *": "allow",
                 "gh *": "allow",
+                "mise run *": "allow",
                 "*>*": "deny",
                 "*<*": "deny",
                 "*--output*": "deny",
