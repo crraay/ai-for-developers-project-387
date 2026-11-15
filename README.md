@@ -126,14 +126,16 @@ or PR triggers:
 | Backend | web service `call-calendar-api` | https://call-calendar-api-55jr.onrender.com |
 | Database | Postgres `call-calendar-db` (free) | internal, not exposed |
 
-To deploy: push to `main`, then run the [`deploy`](.github/workflows/deploy.yml)
-workflow by hand (GitHub → Actions → **deploy** → *Run workflow*), selecting
-**`main`** in the branch dropdown — Render builds `main`, so the checked-out code
-and the deployed code must be the same. (The *Run workflow* button is only
-registered once the file exists on the default branch, `dev`; both branches carry
-`deploy.yml`.) The workflow runs the same `mise run check` gate CI runs,
-deploys the backend first and the static site
-second, then verifies the live deployment (API ping, served index, CORS
+To deploy: push to the branch you want to ship, then run the
+[`deploy`](.github/workflows/deploy.yml) workflow by hand (GitHub → Actions →
+**deploy** → *Run workflow*), selecting that branch in the dropdown. The workflow
+deploys exactly that branch's HEAD commit — it passes the checked-out
+`git rev-parse HEAD` as Render's `commitId` — so the validated code and the
+deployed code are always the same, regardless of which branch the services are
+connected to. (The *Run workflow* button is only registered once the file exists
+on the default branch, `dev`; both branches carry `deploy.yml`.) The workflow runs
+the same `mise run check` gate CI runs, deploys the backend first and the static
+site second, then verifies the live deployment (API ping, served index, CORS
 preflight).
 
 One-time setup: add a `RENDER_API_KEY` repository secret (Settings → Secrets and

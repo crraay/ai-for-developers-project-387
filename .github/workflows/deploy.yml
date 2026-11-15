@@ -48,9 +48,16 @@ jobs:
             local service_id="$1"
             local label="$2"
             local deploy_id status attempt
+            # Deploy the exact commit this workflow checked out, so the branch
+            # selected in the "Run workflow" dropdown is what reaches Render —
+            # not whatever branch the service happens to be connected to.
+            local commit_sha
+            commit_sha="$(git rev-parse HEAD)"
 
             deploy_id=$(curl -fsS -X POST \
               -H "Authorization: Bearer ${RENDER_API_KEY}" \
+              -H "Content-Type: application/json" \
+              -d "{\"commitId\":\"${commit_sha}\"}" \
               "https://api.render.com/v1/services/${service_id}/deploys" |
               jq -er '.id // .deploy.id')
             echo "::notice::${label}: started deploy ${deploy_id}"
