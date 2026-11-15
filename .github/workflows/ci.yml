@@ -1,0 +1,115 @@
+name: ci
+
+on:
+  push: # every push, any branch
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # commitlint below needs the default branch and its history
+      - uses: jdx/mise-action@6612f0ef07ed2a736cd1e00a94a065522dd41195 # v5.2.5
+
+      - name: One-time setup (same command as a local clone)
+        run: mise run setup
+
+      # The one gate: everything a developer runs locally. Includes the
+      # generated-code freshness gate (regenerates spec + client, fails on diff)
+      # and the end-to-end browser test against the real Compose stack.
+      - name: mise run check
+        run: mise run check
+
+      # Lint the commits this push adds. On a branch push, `before..sha` stops
+      # being that once the branch merges the default branch: it re-lints the
+      # merged-in commits, so a message that already landed (and was gated) on
+      # the default branch fails every branch that merges it. Compare against
+      # the default branch instead; a push to the default branch keeps the
+      # pushed-range semantics.
+      - name: Conventional Commits on the pushed range
+        if: github.event_name == 'push' && github.event.before != '0000000000000000000000000000000000000000'
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          BEFORE: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          if [ "$GITHUB_REF_NAME" = "$DEFAULT_BRANCH" ]; then
+            from="$BEFORE"
+          else
+            from="origin/$DEFAULT_BRANCH"
+          fi
+          npx commitlint --from="$from" --to="$HEAD_SHA"
+
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: check
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Pin BuildKit to a known version so cache-from/cache-to behave the
+      # same on every runner image the GHA fleet rolls between.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # Build the two service images out-of-band from `docker compose up`
+      # so we can wire BuildKit's GHA cache backend to type=gha. The
+      # resulting tags (`backend:smoke` / `frontend:smoke`) are picked up by
+      # docker-compose.yml's `image:` pins, so the `up` step below is a
+      # plain `docker compose up -d` with no build phase.
+      - name: Build backend image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ./backend
+          push: false
+          load: true
+          tags: backend:smoke
+          cache-from: type=gha,scope=backend-smoke
+          cache-to: type=gha,mode=max,scope=backend-smoke
+
+      - name: Build frontend image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ./frontend
+          push: false
+          load: true
+          tags: frontend:smoke
+          cache-from: type=gha,scope=frontend-smoke
+          cache-to: type=gha,mode=max,scope=frontend-smoke
+
+      - name: Build and start the stack
+        run: docker compose up -d
+
+      - name: Backend answers ping
+        run: |
+          body=$(curl --retry 12 --retry-delay 5 --retry-all-errors -fsS http://localhost:8080/api/ping)
+          test "$body" = "pong"
+
+      - name: Frontend serves the app
+        run: curl -fsS http://localhost:5173 | grep -q 'id="root"'
+
+      - name: Spec and Swagger UI are served
+        run: |
+          curl -fsS http://localhost:8080/swagger/call-calendar-0.1.yml | grep -q "openapi: 3"
+          curl -fsS http://localhost:8080/swagger-ui/ | grep -qi "swagger-ui"
+
+      - name: Booking round trip (slots -> book -> cancel)
+        run: bash scripts/smoke-booking.sh
+
+      - name: Dump logs on failure
+        if: failure()
+        run: docker compose logs
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

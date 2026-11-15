@@ -1,0 +1,141 @@
+[tools]
+java = "temurin-25"
+node = "24"
+hk = "2.10.0"
+typos = "1.51.1"
+betterleaks = "1.9.0"
+hadolint = "2.15.1"
+jactionlint = "2.4.0"
+shellcheck = "0.11.0" # jactionlint delegates workflow shell blocks to it
+vacuum = "0.36.1"
+osv-scanner = "2.7.0"
+
+# Expose repo-local npm tools (commitlint at root; prettier/eslint/stylelint in
+# frontend/) to mise tasks and hk hooks.
+[env]
+_.path = ["node_modules/.bin", "frontend/node_modules/.bin"]
+
+# ---------------------------------------------------------------------------
+# Setup. One command for a clean clone; CI and the deploy workflow run the same
+# task, so the local and remote prerequisites cannot drift.
+# ---------------------------------------------------------------------------
+
+[tasks.setup]
+description = "One-time per clone: install root, frontend and TypeSpec JS dependencies plus the Playwright browser"
+run = [
+  "npm ci",
+  "npm --prefix frontend ci",
+  "npm --prefix typespec ci",
+  "npx playwright install chromium",
+]
+
+# ---------------------------------------------------------------------------
+# Checks. `mise run check` runs everything; CI runs exactly this command.
+# ---------------------------------------------------------------------------
+
+[tasks."check:backend"]
+description = "Spotless format gate, compile (Error Prone + NullAway), JUnit + Testcontainers"
+dir = "backend"
+run = "./gradlew spotlessCheck test"
+run_windows = "gradlew.bat spotlessCheck test"
+
+[tasks."check:frontend"]
+description = "eslint, prettier, stylelint, Vitest, type-check + production build"
+dir = "frontend"
+run = [
+  "npm run lint",
+  "npm run format:check",
+  "npm run lint:scss",
+  "npm test -- --run",
+  "npm run build",
+]
+
+[tasks."check:contracts"]
+description = "Lint the OpenAPI spec (vacuum)"
+run = "vacuum lint openapi/api.yml"
+
+[tasks."check:repo"]
+description = "Repo hygiene: typos, secrets, Dockerfiles, workflow lint"
+run = [
+  "typos",
+  "betterleaks dir --config .betterleaks.toml .",
+  "hadolint Dockerfile backend/Dockerfile frontend/Dockerfile",
+  # Fixed file list on purpose: hexlet-check.yml is managed externally and must
+  # not be edited, so it is excluded by omission rather than by an ignore rule.
+  # Accepted findings (scope, reason, expiry) live in .github/jactionlint.yaml.
+  "jactionlint .github/workflows/ci.yml .github/workflows/security.yml .github/workflows/release-please.yml .github/workflows/pr-title.yml .github/workflows/deploy.yml .github/workflows/opencode.yml .github/workflows/opencode-review.yml",
+  # Issue #38: every ADR must state its status, or the header block stops being a shortcut.
+  "node scripts/check-adr-status.mjs",
+]
+
+[tasks."check:browser"]
+description = "End-to-end browser test: guest books a slot and the host view shows it"
+# The browser test builds the backend and frontend Docker images, so wait for
+# those checks to finish and avoid concurrent gradlew/npm builds touching the
+# same source trees.
+depends = ["check:backend", "check:frontend"]
+run = "npm run test:e2e"
+
+[tasks.check]
+description = "Every check: backend, frontend, contracts, repo hygiene, browser test, generated-code freshness"
+depends = ["check:backend", "check:frontend", "check:contracts", "check:repo", "check:browser"]
+# runs only when all dependencies pass: regenerate and verify committed output is fresh
+run = "mise run check:generated"
+
+[tasks."check:generated"]
+description = "Fail if committed generated files (openapi/api.yml, frontend/src/api) are stale or missing"
+depends = ["generate"]
+# Stage generated paths (including previously untracked files) before diffing
+# against HEAD. A freshly generated client that was never `git add`ed must fail
+# the freshness gate just like a modified one.
+run = "git add -A -- openapi frontend/src/api && git diff --cached --exit-code -- openapi frontend/src/api"
+
+# ---------------------------------------------------------------------------
+# Generation
+# ---------------------------------------------------------------------------
+
+[tasks."generate:spec"]
+description = "Regenerate openapi/api.yml from the TypeSpec contract source"
+dir = "typespec"
+run = "npm run compile"
+
+[tasks."generate:client"]
+description = "Regenerate the React client from openapi/api.yml"
+dir = "frontend"
+depends = ["generate:spec"]
+run = "npm run generate:api"
+
+[tasks.generate]
+description = "Regenerate the OpenAPI spec and the frontend API client"
+depends = ["generate:client"]
+
+# ---------------------------------------------------------------------------
+# Autofix
+# ---------------------------------------------------------------------------
+
+[tasks."fix:backend"]
+dir = "backend"
+run = "./gradlew spotlessApply"
+run_windows = "gradlew.bat spotlessApply"
+
+[tasks."fix:frontend"]
+dir = "frontend"
+run = ["npm run lint -- --fix", "npm run lint:scss -- --fix", "npm run format:write"]
+
+[tasks.fix]
+description = "Apply every safe autofix (spotlessApply, eslint --fix, stylelint --fix, prettier)"
+depends = ["fix:backend", "fix:frontend"]
+
+# ---------------------------------------------------------------------------
+# Smoke (needs Docker)
+# ---------------------------------------------------------------------------
+
+[tasks.smoke]
+description = "Build the compose stack, verify backend + frontend + Swagger UI, tear down"
+# Single-line scripts: multi-line `run_windows` executes only its first line
+# (mise on Windows/cmd, verified empirically; filed as jdx/mise#15231),
+# so both variants chain with &&.
+# On assertion failure the stack is left running for inspection (CI has its own
+# inline smoke steps with `if: always()` teardown).
+run = """trap 'docker compose down -v' EXIT; docker compose up --build -d && body=$(curl --retry 12 --retry-delay 5 --retry-all-errors -fsS http://localhost:8080/api/ping) && test "$body" = "pong" && curl -fsS http://localhost:5173 | grep -q 'id="root"' && curl -fsS http://localhost:8080/swagger/call-calendar-0.1.yml | grep -q "openapi: 3" && curl -fsS http://localhost:8080/swagger-ui/ | grep -qi swagger-ui && bash scripts/smoke-booking.sh"""
+run_windows = """docker compose up --build -d && curl --retry 12 --retry-delay 5 --retry-all-errors -fsS http://localhost:8080/api/ping | findstr /c:"pong" >nul && curl -fsS http://localhost:5173 | findstr /r /c:"id=.root." >nul && curl -fsS http://localhost:8080/swagger/call-calendar-0.1.yml | findstr /c:"openapi: 3" >nul && curl -fsS http://localhost:8080/swagger-ui/ | findstr /i /c:"swagger-ui" >nul && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke-booking.ps1 && docker compose down -v"""

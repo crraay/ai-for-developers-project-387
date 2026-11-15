@@ -1,0 +1,131 @@
+import net.ltgt.gradle.errorprone.CheckSeverity
+
+plugins {
+    id("io.micronaut.application") version "5.0.2"
+    id("com.gradleup.shadow") version "9.4.1"
+    id("io.micronaut.aot") version "5.0.2"
+    id("net.ltgt.errorprone") version "5.1.1"
+    id("net.ltgt.nullaway") version "3.2.0"
+    id("com.diffplug.spotless") version "8.10.4"
+}
+
+version = "0.1"
+group = "com.callcalendar"
+
+
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    annotationProcessor("io.micronaut:micronaut-http-validation")
+    annotationProcessor("io.micronaut.openapi:micronaut-openapi")
+    annotationProcessor("io.micronaut.serde:micronaut-serde-processor")
+    compileOnly("io.micronaut.openapi:micronaut-openapi-annotations")
+    implementation("io.micronaut.liquibase:micronaut-liquibase")
+    implementation("io.micronaut.serde:micronaut-serde-jackson")
+    implementation("io.micronaut.sql:micronaut-jdbc-hikari")
+    implementation("org.mnode.ical4j:ical4j:4.4.0")
+    implementation("org.slf4j:jul-to-slf4j")
+    compileOnly("io.micronaut:micronaut-http-client")
+    runtimeOnly("ch.qos.logback:logback-classic")
+    runtimeOnly("org.postgresql:postgresql")
+    testImplementation("io.micronaut:micronaut-http-client")
+    testImplementation("org.apache.commons:commons-compress:1.28.0")
+    testImplementation("org.testcontainers:testcontainers")
+    testImplementation("org.testcontainers:testcontainers-junit-jupiter")
+    testImplementation("org.testcontainers:testcontainers-postgresql")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+    errorprone("com.google.errorprone:error_prone_core:2.51.0")
+    errorprone("com.uber.nullaway:nullaway:0.14.3")
+}
+
+
+
+application {
+    mainClass = "com.callcalendar.Application"
+}
+
+java {
+    sourceCompatibility = JavaVersion.toVersion("25")
+    targetCompatibility = JavaVersion.toVersion("25")
+}
+
+// Needed so micronaut-openapi sees real parameter names in the generated spec
+tasks.withType(JavaCompile).configureEach {
+    options.compilerArgs.add("-parameters")
+    options.errorprone {
+        disableWarningsInGeneratedCode = true
+        nullaway {
+            severity = CheckSeverity.ERROR
+        }
+    }
+}
+
+nullaway {
+    annotatedPackages = "com.callcalendar"
+}
+
+spotless {
+    java {
+        // 1.37.0 crashes inside Spotless's in-daemon invocation on JDK 25
+        // (InvocationTargetException on every file); 1.36.1 works. Retest before upgrading.
+        googleJavaFormat("1.36.1")
+    }
+}
+
+// The OpenAPI spec is no longer exported from the annotation output: it is
+// compiled from typespec/ (ADR-0008) by `mise run generate`. The annotations
+// still feed the runtime Swagger UI only.
+graalvmNative.toolchainDetection = false
+graalvmNative {
+    binaries {
+        all {
+            buildArgs.add("-H:+SharedArenaSupport")
+        }
+    }
+}
+
+
+
+
+micronaut {
+    runtime("netty")
+    testRuntime("junit5")
+    processing {
+        incremental(true)
+        annotations("com.callcalendar.*")
+    }
+    aot {
+        // Please review carefully the optimizations enabled below
+        // Check https://micronaut-projects.github.io/micronaut-aot/latest/guide/ for more details
+        convertYamlToJava = false
+        precomputeOperations = false
+        cacheEnvironment = false
+        optimizeClassLoading = true
+        deduceEnvironment = false
+        optimizeNetty = true
+        replaceLogbackXml = true
+    }
+
+}
+tasks.named("dockerfile") {
+
+    baseImage = "eclipse-temurin:25-jre"
+}
+
+
+
+
+
+
+
+// https://docs.gradle.org/current/userguide/upgrading_major_version_9.html#test_task_fails_when_no_tests_are_discovered
+tasks.withType(AbstractTestTask).configureEach {
+    failOnNoDiscoveredTests = false
+}
+
+
+
+

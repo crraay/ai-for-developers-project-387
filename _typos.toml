@@ -1,0 +1,19 @@
+# Generated files and lockfiles are not spell-checked: they change only via
+# generators/package managers, never by hand. `.agents/` is vendored skill
+# content (installed upstream), likewise not ours to fix.
+[files]
+extend-exclude = [
+  ".agents/**",
+  "frontend/src/app/api",
+  "openapi/api.yml",
+  "package-lock.json",
+  "frontend/package-lock.json",
+  "mise.lock",
+]
+
+[default]
+# release-please writes commit hashes as 7-char markdown links. typos only
+# treats long digests as hashes, so a dictionary word inside a short hash
+# (e.g. `ba` in [ba026aa](...)) is reported as a typo. Ignore just the links,
+# so changelog prose is still checked.
+extend-ignore-re = ['\[[0-9a-f]{7,40}\]\([^)]*\)']
