@@ -29,3 +29,14 @@ ignores:
       script the pinned anomalyco/opencode/github action runs; there is no
       checksummed binary to verify against.
     expires: "2027-05-13"
+  # Same as the todo-fixme-audit entry above: the OSV-Scanner audit installs the
+  # opencode CLI the same way, so whoever controls the opencode release channel
+  # controls the agent step only. The exposure is the model key and the issues
+  # write scope, not the repository's code, which is why the entry expires.
+  - rule: unverified-download
+    file: .github/workflows/security.yml
+    reason: >-
+      The opencode installer is the only distribution channel and is the same
+      script the pinned anomalyco/opencode/github action and the todo-fixme-audit
+      workflow run; there is no checksummed binary to verify against.
+    expires: "2027-05-13"

@@ -1,13 +1,53 @@
 name: security
 
+# Standalone OSV-Scanner lockfile audit. Runs on a schedule (Mondays) and on
+# demand via workflow_dispatch. The scanner's report and exit code are always
+# saved as a workflow artifact, and the run classifies itself into one of four
+# outcomes, so a run never disappears silently:
+#
+#   exit 0   -> clean         (packages scanned, no vulnerabilities)
+#   exit 1   -> findings      (vulnerabilities)          -> the agent triages
+#   exit 128 -> no-packages   (no lockfile recognized)   -> job fails
+#   other    -> scanner-error (127 general error, 129+ non-result error, etc.)
+#                              -> job fails
+#
+# The audit is independent of todo-fixme-audit.yml: a different concurrency
+# group, a different artifact name, and a different schedule, so the two audits
+# never share state or queue behind each other. They are separate workflows by
+# design — one greps for markers, this one scans lockfiles.
+#
+# Authorization: the scanner step and the read-only parts of the triage step
+# need only GITHUB_TOKEN. The agent needs to create issues for untracked
+# vulnerabilities, so the job asks for the narrowest write scope there is —
+# `issues: write` — and nothing else. `contents` stays read-only, so the agent
+# can file an issue but cannot touch code, releases, or secrets. The model key
+# (OPENCODE_API_KEY) is read only by the agent step, and the agent runs only
+# when the scanner found vulnerabilities.
+#
+# The pinned github action is not used here for the same reason as in
+# todo-fixme-audit.yml: for schedule/workflow_dispatch it checks out a
+# throwaway branch and, when the worktree is dirty, pushes it and opens a PR.
+# That cannot "save the report even without findings". Instead the opencode CLI
+# is installed and run directly (`opencode run`), which writes the final answer
+# to stdout and its own logs to stderr, so the report is captured
+# deterministically. The agent is told to read the scanner report from
+# .osv-audit/, which lives inside the checkout (outside the checkout would be
+# blocked by `external_directory`).
+#
+# The scanner version is pinned in mise.toml (`osv-scanner = "2.7.0"`); the
+# version-assert step below makes that pin visible and enforced in the run.
+
 on:
   schedule:
     - cron: "24 5 * * 1" # Mondays 05:24 UTC
   workflow_dispatch:
 
-permissions:
-  contents: read
+# Deny every token permission by default; the job asks for the two it needs.
+permissions: {}
 
+# One audit at a time. A run that overlaps a previous one queues behind it
+# instead of working concurrently, and an in-flight run is never cancelled (its
+# report would be lost while the run is gone).
 concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: false
@@ -15,13 +55,216 @@ concurrency:
 jobs:
   osv-scanner:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
+    permissions:
+      contents: read # checkout of this repository
+      issues: write # the agent files an issue for each untracked vulnerability
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: jdx/mise-action@6612f0ef07ed2a736cd1e00a94a065522dd41195 # v5.2.5
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
 
-      # Scheduled (not on push) on purpose: a new advisory must not break
-      # unrelated pushes. Expiring suppressions live in osv-scanner.toml.
-      # Known gap: backend Gradle deps are not scanned (no gradle lockfile).
-      - name: Scan lockfiles for known vulnerabilities
-        run: osv-scanner scan source --recursive --config osv-scanner.toml .
+      - name: Install pinned toolchain
+        uses: jdx/mise-action@6612f0ef07ed2a736cd1e00a94a065522dd41195 # v5.2.5
+
+      # mise.toml pins osv-scanner to 2.7.0; fail the run here if that ever
+      # drifts, rather than silently auditing with an unpinned version.
+      - name: Assert the pinned scanner version
+        run: |
+          set -euo pipefail
+          version="$(osv-scanner --version)"
+          echo "osv-scanner ${version}"
+          case "$version" in
+            *2.7.0*) ;;
+            *) echo "::error::osv-scanner version drift: ${version}" >&2; exit 1 ;;
+          esac
+
+      # opencode.json reads the Render MCP token from .render-api-key, a
+      # gitignored local secret. The config is rejected while that file is
+      # missing, so create an empty placeholder (same as opencode.yml); the
+      # agent has no Render key and a failed MCP connection does not stop a run.
+      - name: Provide the local config's secret file placeholder
+        run: touch .render-api-key
+
+      # Scan and capture the report, the scanner stderr and the exit code. The
+      # runner wraps `run:` in `bash -e`, so errexit is on before this script
+      # starts; `set +e` turns it off around the scanner because a non-zero
+      # exit is an outcome to classify (findings, no packages, scanner error),
+      # not a step failure. Capturing `$?` right after keeps the run on the
+      # path to the classification and upload steps below.
+      - name: Scan lockfiles with OSV-Scanner
+        run: |
+          set -uo pipefail
+          mkdir -p .osv-audit
+          set +e
+          osv-scanner scan source --recursive --config osv-scanner.toml --format markdown . \
+            > .osv-audit/report.md 2> .osv-audit/scanner.log
+          printf '%s\n' "$?" > .osv-audit/exit-code
+
+      # Map the exit code onto the four outcomes documented at the top. The
+      # outcome drives whether the agent runs and is recorded in the artifact.
+      - name: Classify the scan result
+        id: classify
+        run: |
+          set -euo pipefail
+          code="$(cat .osv-audit/exit-code)"
+          case "$code" in
+            0)   outcome="clean" ;;
+            1)   outcome="findings" ;;
+            128) outcome="no-packages" ;;
+            *)   outcome="scanner-error" ;;
+          esac
+          printf '%s\n' "$outcome" > .osv-audit/outcome
+          echo "osv-scanner exit ${code} -> ${outcome}"
+          {
+            echo "outcome=${outcome}"
+            echo "exit-code=${code}"
+            echo "today=$(date -u +%F)"
+          } >> "$GITHUB_OUTPUT"
+
+      # The agent triages findings: cross-reference existing issues, file one
+      # per untracked vulnerability. It runs only when there are findings — a
+      # clean run just saves the artifact.
+      #
+      # A scanner error or a "no packages" result means the audit did not do its
+      # job (the scanner crashed/errored, or failed to recognise the lockfiles
+      # this repo has). Those must not end green: fail the job with a distinct
+      # message, so a broken weekly audit is visible on the checks tab, not
+      # hidden behind a green tick and an artifact. The upload step still runs
+      # afterwards because it is gated on `!cancelled()`, not `success()`.
+      - name: Fail on a broken audit
+        if: ${{ steps.classify.outputs.outcome == 'scanner-error' || steps.classify.outputs.outcome == 'no-packages' }}
+        run: |
+          set -euo pipefail
+          outcome="$(cat .osv-audit/outcome)"
+          if [ "$outcome" = "scanner-error" ]; then
+            echo "::error::OSV-Scanner failed (exit $(cat .osv-audit/exit-code)); see the uploaded artifact." >&2
+          else
+            echo "::error::OSV-Scanner found no lockfiles to scan; see the uploaded artifact." >&2
+          fi
+          exit 1
+
+      - name: Install opencode
+        if: ${{ steps.classify.outputs.outcome == 'findings' }}
+        run: |
+          set -euo pipefail
+          curl -fsSL https://opencode.ai/install | bash
+          echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
+
+      - name: Triage findings with OpenCode
+        id: agent
+        if: ${{ steps.classify.outputs.outcome == 'findings' }}
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          # The job's GITHUB_TOKEN carries only `issues: write` on top of
+          # `contents: read`, so the whitelisted `gh issue create` can file an
+          # issue but nothing else can write. Naming it GH_TOKEN is what makes
+          # `gh` pick it up.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Anything that would prompt is denied: a prompt cannot be answered on
+          # a runner. Shape is opencode's V1 `permission` object (the installed
+          # binary), merged over opencode.json. The last matching key wins, so
+          # the wildcard comes first and the guards come last.
+          OPENCODE_PERMISSION: |
+            {
+              "edit": "deny",
+              "write": "deny",
+              "read": {
+                "*": "allow",
+                "*.env": "deny",
+                "*.env.*": "deny"
+              },
+              "external_directory": "deny",
+              "question": "deny",
+              "task": "deny",
+              "todowrite": "deny",
+              "webfetch": "deny",
+              "websearch": "deny",
+              "bash": {
+                "*": "deny",
+                "gh issue list": "allow",
+                "gh issue list *": "allow",
+                "gh issue view *": "allow",
+                "gh search issues *": "allow",
+                "gh issue create": "allow",
+                "gh issue create *": "allow",
+                "*$*": "deny",
+                "*`*": "deny",
+                "*>*": "deny",
+                "*<*": "deny"
+              }
+            }
+        run: |
+          set -euo pipefail
+          opencode run --model opencode-go/deepseek-v4.1-flash \
+            > .osv-audit/agent-report.md 2> .osv-audit/agent.log <<'PROMPT'
+          You are running a scheduled OSV-Scanner lockfile audit in this
+          repository. The scanner already ran and found vulnerabilities. Your
+          job is to triage them and file one issue per untracked vulnerable
+          package, then return a Markdown report as your final answer.
+
+          First read these files with the read tool (relative to the repo root):
+            - .osv-audit/report.md   — the osv-scanner --format markdown output.
+                                       Each table row is one advisory; several
+                                       rows can affect the same package.
+            - .osv-audit/exit-code   — the scanner exit code (1 = findings).
+            - .osv-audit/scanner.log — scanner stderr, for context if needed.
+
+          Group the advisories by package. For each affected package,
+          cross-reference the existing open issues using only these commands,
+          via bash (keep every --jq filter and every title and body free of the
+          characters > and <):
+            gh issue list --state open
+            gh issue list --search "<text>"
+            gh issue view <number>
+            gh search issues "<text>"
+          A package is "tracked" when an open issue already covers it and its
+          advisories, and "untracked" otherwise.
+
+          For each untracked package, create ONE issue:
+            gh issue create --title "Vulnerable <package> (<advisory-id>)" --body "..."
+          List every advisory ID for that package in the title or body, and name
+          the affected version, the highest fixed version (or "no fix
+          available") and the lockfile path. Keep the title and body on one
+          line and free of > and <.
+
+          Do NOT edit osv-scanner.toml (no new suppressions), do NOT edit or
+          upgrade any lockfile or dependency, and do NOT open a pull request. A
+          suppression or a dependency upgrade needs a human decision; file the
+          issue instead.
+
+          Return only this Markdown report as your final answer:
+
+            ## OSV-Scanner lockfile audit
+            **Vulnerabilities found:** <n> (tracked: <t>, untracked: <u>)
+
+            | Package | Advisory | Fixed version | Status |
+            |---|---|---|---|
+            | pkg | GHSA-xxxx | 1.2.3 | tracked in #123 / filed #124 |
+
+          Then a short Notes section. Do not use the web and do not modify any
+          file, issue, pull request or comment other than creating the issues
+          above. The report is captured from your answer and uploaded as a
+          workflow artifact.
+          PROMPT
+          if [ ! -s .osv-audit/agent-report.md ]; then
+            printf 'No triage report produced.\n' > .osv-audit/agent-report.md
+          fi
+
+      # Always upload, even when a later step failed: the scanner report, its
+      # exit code, the classification, the scanner stderr and (on findings) the
+      # agent's triage report are the whole point of the audit. The fallback in
+      # the agent step guarantees agent-report.md exists whenever it ran.
+      - name: Upload the audit artifact
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: osv-scanner-audit-${{ steps.classify.outputs.today || 'unknown' }}
+          path: .osv-audit/
+          # .osv-audit is a dot-directory; upload-artifact skips hidden paths
+          # unless told otherwise.
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 90

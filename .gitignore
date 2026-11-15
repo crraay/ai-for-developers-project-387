@@ -4,6 +4,9 @@ node_modules/
 .env
 .render-api-key
 
+# OSV-Scanner audit report captured by the security workflow (CI-only)
+.osv-audit/
+
 # Playwright test artifacts
 playwright-report/
 test-results/
