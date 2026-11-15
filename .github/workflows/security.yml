@@ -87,14 +87,17 @@ jobs:
       - name: Provide the local config's secret file placeholder
         run: touch .render-api-key
 
-      # Scan and capture the report, the scanner stderr and the exit code. No
-      # `set -e`: a non-zero exit is an outcome to classify (findings, no
-      # packages, scanner error), not a step failure, so the run always reaches
-      # the classification and upload steps below.
+      # Scan and capture the report, the scanner stderr and the exit code. The
+      # runner wraps `run:` in `bash -e`, so errexit is on before this script
+      # starts; `set +e` turns it off around the scanner because a non-zero
+      # exit is an outcome to classify (findings, no packages, scanner error),
+      # not a step failure. Capturing `$?` right after keeps the run on the
+      # path to the classification and upload steps below.
       - name: Scan lockfiles with OSV-Scanner
         run: |
           set -uo pipefail
           mkdir -p .osv-audit
+          set +e
           osv-scanner scan source --recursive --config osv-scanner.toml --format markdown . \
             > .osv-audit/report.md 2> .osv-audit/scanner.log
           printf '%s\n' "$?" > .osv-audit/exit-code
@@ -238,5 +241,8 @@ jobs:
         with:
           name: osv-scanner-audit-${{ steps.classify.outputs.today || 'unknown' }}
           path: .osv-audit/
+          # .osv-audit is a dot-directory; upload-artifact skips hidden paths
+          # unless told otherwise.
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 90
