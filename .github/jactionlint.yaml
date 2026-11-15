@@ -15,3 +15,17 @@ ignores:
       the /oc comment; the workflow's own token cannot write, and the action
       checks that the actor has admin or write access to the repository.
     expires: "2027-05-13"
+  # The audit workflow installs the opencode CLI with the same
+  # `curl -fsSL https://opencode.ai/install | bash` that the pinned
+  # anomalyco/opencode/github action runs internally. opencode ships no
+  # checksummed distribution; the SHA pin freezes the wrapper but the installer
+  # still resolves `releases/latest`, so this path carries no more exposure than
+  # the action the other workflows already trust. The remaining exposure is the
+  # model key and the App token, which is why the entry expires.
+  - rule: unverified-download
+    file: .github/workflows/todo-fixme-audit.yml
+    reason: >-
+      The opencode installer is the only distribution channel and is the same
+      script the pinned anomalyco/opencode/github action runs; there is no
+      checksummed binary to verify against.
+    expires: "2027-05-13"

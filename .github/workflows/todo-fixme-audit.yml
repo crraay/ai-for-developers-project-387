@@ -1,0 +1,207 @@
+name: todo-fixme-audit
+
+# Daily audit of TODO/FIXME (and HACK/XXX/CHANGEME) markers. Runs once a day on
+# a schedule (00:00 UTC+7) and on demand via workflow_dispatch.
+#
+# The audit is read-only: the agent greps the tree, cross-references each marker
+# against the existing open issues, and returns a Markdown report. The report is
+# filed as a NEW issue — one per run — so a run with no findings still records
+# itself. No code is edited and no pull request is opened.
+#
+# The pinned github action is not used here: for schedule/workflow_dispatch it
+# checks out a throwaway branch and, when the worktree is dirty, pushes it and
+# opens a PR; otherwise it only logs the answer. That cannot "save the result
+# even without findings". Instead the opencode CLI is installed and run directly
+# (`opencode run`), which writes the final answer to stdout and its own logs to
+# stderr, so the report is captured deterministically.
+#
+# Authorization mirrors opencode.yml: the model key (OPENCODE_API_KEY) is read
+# only by the agent step; the job's GITHUB_TOKEN stays read-only and is what the
+# agent uses to search issues; the last step exchanges a fresh OIDC token for the
+# OpenCode App token (which carries issues write) and files the report issue.
+
+on:
+  schedule:
+    - cron: "0 17 * * *" # 00:00 UTC+7
+  workflow_dispatch:
+
+# Deny every token permission by default; the job asks for the three it needs.
+permissions: {}
+
+# One audit at a time. A run that overlaps a previous one queues behind it
+# instead of working concurrently, and an in-flight run is never cancelled (its
+# report issue would be lost while the run is gone).
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read # checkout of this repository
+      issues: read # gh issue list / gh search issues in the agent step
+      id-token: write # OIDC exchange for the App token that files the report
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      # opencode.json reads the Render MCP token from .render-api-key, a
+      # gitignored local secret. The config is rejected while that file is
+      # missing, so create an empty placeholder (same as opencode.yml); the
+      # agent has no Render key and a failed MCP connection does not stop a run.
+      - name: Provide the local config's secret file placeholder
+        run: touch .render-api-key
+
+      # Same install path as the pinned action, without its event-driven runner.
+      - name: Install opencode
+        run: |
+          set -euo pipefail
+          curl -fsSL https://opencode.ai/install | bash
+          echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
+
+      - name: Audit with OpenCode
+        id: agent
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          # Read-only token for the whitelisted `gh` calls. Naming it GH_TOKEN
+          # is what makes `gh` pick it up; the job's GITHUB_TOKEN cannot write.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Anything that would prompt is denied: a prompt cannot be answered on
+          # a runner. Shape is opencode's V1 `permission` object (the installed
+          # binary), merged over opencode.json. The last matching key wins, so
+          # the wildcard comes first and the guards come last.
+          OPENCODE_PERMISSION: |
+            {
+              "edit": "deny",
+              "write": "deny",
+              "read": {
+                "*": "allow",
+                "*.env": "deny",
+                "*.env.*": "deny"
+              },
+              "external_directory": "deny",
+              "question": "deny",
+              "task": "deny",
+              "todowrite": "deny",
+              "webfetch": "deny",
+              "websearch": "deny",
+              "bash": {
+                "*": "deny",
+                "gh issue list": "allow",
+                "gh issue list *": "allow",
+                "gh issue view *": "allow",
+                "gh search issues *": "allow",
+                "*>*": "deny",
+                "*<*": "deny"
+              }
+            }
+        run: |
+          set -euo pipefail
+          tmp="${RUNNER_TEMP:-/tmp}"
+          opencode run --model opencode-go/deepseek-v4.1-flash \
+            > "$tmp/report.md" 2> "$tmp/agent.log" <<'PROMPT'
+          You are running a scheduled TODO/FIXME audit in this repository. Your
+          job is read-only: produce a Markdown report and nothing else.
+
+          1. Find every TODO, FIXME, HACK, XXX and CHANGEME marker in the
+             source. Use the grep tool. Skip generated, vendored and build
+             output: node_modules/, frontend/node_modules/, build/, dist/,
+             target/, .gradle/, openapi/api.yml, frontend/src/api/, .git/, and
+             lockfiles. Skip this workflow file itself if the only matches are
+             its own comments.
+          2. For each marker, note the file, the line and the marker text.
+          3. Cross-reference each marker against the existing issues using only
+             these read commands, via bash (keep the --jq filters free of ">"
+             and "<"):
+               gh issue list --state open
+               gh issue list --search "<text>"
+               gh issue view <number>
+               gh search issues "<text>"
+             A marker is "tracked" when an open issue clearly covers it, and
+             "untracked" otherwise. Do not create or edit any issue.
+          4. Return a Markdown report:
+
+             ## TODO/FIXME audit
+             **Markers found:** <n> (tracked: <t>, untracked: <u>)
+
+             | File | Line | Marker | Status |
+             |---|---|---|---|
+             | path/to/file | 12 | `TODO: ...` | tracked in #123 / untracked |
+
+             Then a short "Notes" section with anything worth a human's
+             attention.
+
+          If there are no markers at all, return exactly:
+
+             ## TODO/FIXME audit
+             **Markers found:** 0
+
+             No TODO/FIXME/HACK/XXX/CHANGEME markers found in the repository.
+
+          Return only the report as your final answer. Do not edit, write,
+          create or modify any file, issue, pull request or comment, and do not
+          use the web. The report is captured from your answer and filed
+          automatically.
+          PROMPT
+          if [ ! -s "$tmp/report.md" ]; then
+            printf 'No TODO/FIXME markers reported.\n' > "$tmp/report.md"
+          fi
+
+      # File one report issue per run, even when the report is empty. A new
+      # issue needs a write-capable token, and the job's GITHUB_TOKEN stays
+      # read-only, so exchange a fresh OIDC token for the App token (the exact
+      # step opencode.yml uses). Run only after the agent succeeded.
+      - name: File the audit report
+        if: ${{ !cancelled() && steps.agent.outcome == 'success' }}
+        env:
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          tmp="${RUNNER_TEMP:-/tmp}"
+
+          oidc_url="${ACTIONS_ID_TOKEN_REQUEST_URL:-}"
+          oidc_request_token="${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}"
+          if [ -z "$oidc_url" ] || [ -z "$oidc_request_token" ]; then
+            echo "::error::OIDC is not available; id-token: write is required."
+            exit 1
+          fi
+          oidc=$(curl -fsS \
+            -H "Authorization: bearer $oidc_request_token" \
+            "$oidc_url&audience=opencode-github-action" | jq -r .value)
+          if [ -z "$oidc" ] || [ "$oidc" = null ]; then
+            echo "::error::OIDC token request failed."
+            exit 1
+          fi
+          app=$(curl -fsS -X POST \
+            -H "Authorization: Bearer $oidc" \
+            https://api.opencode.ai/exchange_github_app_token | jq -r .token)
+          if [ -z "$app" ] || [ "$app" = null ]; then
+            echo "::error::OpenCode App token exchange failed."
+            exit 1
+          fi
+          echo "::add-mask::$app"
+          export GH_TOKEN="$app"
+
+          # One stable label makes the report issues findable. Create it once.
+          if ! gh label list --search "todo-fixme-audit" --json name --jq '.[].name' | grep -qx todo-fixme-audit; then
+            gh label create todo-fixme-audit \
+              --color 0E8A16 \
+              --description "Daily TODO/FIXME audit report"
+          fi
+
+          today=$(date -u -d "+7 hours" +%F) # 00:00 UTC+7
+          run_url="https://github.com/$REPO/actions/runs/$GITHUB_RUN_ID"
+          {
+            printf '> Automated daily TODO/FIXME audit. [Run](%s)\n\n' "$run_url"
+            cat "$tmp/report.md"
+          } > "$tmp/issue.md"
+
+          gh issue create \
+            --title "TODO/FIXME audit — $today" \
+            --label todo-fixme-audit \
+            --body-file "$tmp/issue.md"
