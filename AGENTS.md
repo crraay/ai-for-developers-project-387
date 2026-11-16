@@ -67,6 +67,8 @@ cd frontend && mise exec -- npm start
 
 Issues live in this repo's GitHub Issues, managed via the `gh` CLI. See `docs/agents/issue-tracker.md`.
 
+Any issue an agent creates as ready work — a `/to-spec` spec or a `/to-tickets` ticket — must be labelled `ready-for-agent` in the same step that creates it. The skills already say this; an unlabelled agent-created ticket looks like a raw incoming request, so it is triaged again (or left for the maintainer) instead of being picked up for implementation.
+
 ### Triage labels
 
 Default vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
