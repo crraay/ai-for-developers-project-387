@@ -145,10 +145,20 @@ jobs:
                 "gh issue close *": "allow",
                 "*--output*": "deny",
                 "*--no-index*": "deny",
+                "*--body*": "deny",
+                "*--title*": "deny",
+                "*--remove-label*": "deny",
+                "*--milestone*": "deny",
                 "*>*": "deny",
                 "*<*": "deny",
                 "*;*": "deny",
-                "*&&*": "deny"
+                "*&&*": "deny",
+                "*&*": "deny",
+                "*|*": "deny",
+                "*$*": "deny",
+                "*`*": "deny",
+                "*\n*": "deny",
+                "*\r*": "deny"
               }
             }
         run: |

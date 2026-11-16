@@ -94,6 +94,7 @@ jobs:
       pull-requests: read # fork and head SHA lookup
     outputs:
       allowed: ${{ steps.gate.outputs.allowed }}
+      code: ${{ steps.gate.outputs.code }}
       reason: ${{ steps.gate.outputs.reason }}
       sha: ${{ steps.gate.outputs.sha }}
     steps:
@@ -138,6 +139,7 @@ jobs:
       actions: read # list prior workflow runs for the per-PR budget
     outputs:
       allowed: ${{ steps.check.outputs.allowed }}
+      code: ${{ steps.check.outputs.code }}
       reason: ${{ steps.check.outputs.reason }}
       used: ${{ steps.check.outputs.used }}
       limit: ${{ steps.check.outputs.limit }}
@@ -318,7 +320,13 @@ jobs:
                 "*--output*": "deny",
                 "*--no-index*": "deny",
                 "*;*": "deny",
-                "*&&*": "deny"
+                "*&&*": "deny",
+                "*&*": "deny",
+                "*|*": "deny",
+                "*$*": "deny",
+                "*`*": "deny",
+                "*\n*": "deny",
+                "*\r*": "deny"
               }
             }
 
@@ -420,6 +428,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
+          CODE: ${{ needs.budget.outputs.code || needs.gate.outputs.code || 'preflight' }}
           REASON: ${{ needs.budget.outputs.reason || needs.gate.outputs.reason || 'the preflight check did not allow this run' }}
           SHA: ${{ needs.budget.outputs.sha || needs.gate.outputs.sha || github.sha }}
           USED: ${{ needs.budget.outputs.used }}
@@ -432,10 +441,12 @@ jobs:
           {
             echo '**OpenCode did not start.**'
             echo
+            echo "- Reason code: \`${CODE}\`"
             printf '%s\n' "${REASON}"
             echo
             echo "- Commit: \`${SHA}\`"
             echo "- Run: ${RUN_URL}"
+            echo '- **Status: needs human.** Do not retry automatically; inspect the log before choosing the next action.'
             if [ -n "${USED:-}" ] && [ -n "${LIMIT:-}" ]; then
               echo "- Budget: ${USED}/${LIMIT} attempts used"
             fi
@@ -443,7 +454,7 @@ jobs:
               echo "- Provider quota: ${QUOTA}"
             fi
             echo
-            echo 'Do not retry this command; raise the limit or wait for the provider window to reset.'
+            echo 'A human chooses the next action: raise the limit, wait for the provider window, or revise the request.'
           } > "$body"
           {
             echo '## OpenCode run stopped'
@@ -452,4 +463,86 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           gh issue comment "$NUMBER" --repo "$REPO" --body-file "$body"
           echo "::error::${REASON}"
+          exit 1
+
+  report:
+    # The preflight checks passed, so the model was allowed to run; the failure
+    # happened after that. This job has no model key and gives the stopped run a
+    # reason code, the last SHA and the log link. A timeout or cancellation is
+    # reported as `timeout`; a failed setup step is `infra`; everything else is
+    # `agent_failed` for a human to inspect.
+    needs: [gate, budget, opencode]
+    if: |
+      always() &&
+      needs.gate.outputs.allowed == 'true' &&
+      needs.budget.outputs.allowed == 'true' &&
+      (needs.opencode.result == 'failure' || needs.opencode.result == 'cancelled')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read # inspect the opencode job's failed step
+      issues: write # post the reason on the issue or PR
+    steps:
+      - name: Classify and post the agent failure
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
+          SHA: ${{ needs.gate.outputs.sha || github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RESULT: ${{ needs.opencode.result }}
+          TIMEOUT_MINUTES: 45
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          reason=agent_failed
+          if [ "$RESULT" = 'cancelled' ]; then
+            reason=timeout
+          else
+            jobs=$(gh api "repos/$REPO/actions/runs/$RUN_ID/jobs?per_page=100")
+            duration=$(printf '%s\n' "$jobs" | jq -r '
+              .jobs[] | select(.name == "opencode")
+              | if .completed_at and .started_at
+                then ((.completed_at | fromdateiso8601) - (.started_at | fromdateiso8601))
+                else 0 end
+            ' | head -n 1)
+            if [ "${duration:-0}" -ge $((TIMEOUT_MINUTES * 60 - 60)) ]; then
+              reason=timeout
+            else
+              failed=$(printf '%s\n' "$jobs" | jq -r '
+                .jobs[] | select(.name == "opencode") | .steps[]
+                | select(.conclusion == "failure") | .name
+              ' | head -n 1)
+              case "${failed:-}" in
+                "Checkout repository"|"Provide the local config's secret file placeholder"|"Install the pinned toolchain"|"Remember the newest PR comment"|"Exchange App token for the agent"|"Answer in the review thread")
+                  reason=infra
+                  ;;
+              esac
+            fi
+          fi
+
+          body="${RUNNER_TEMP:-/tmp}/agent-failure.md"
+          {
+            echo '**OpenCode failed after the preflight passed.**'
+            echo
+            echo "- Reason code: \`${reason}\`"
+            echo "- Commit: \`${SHA}\`"
+            echo "- Run: ${RUN_URL}"
+            echo '- **Status: needs human.** Do not retry automatically; inspect the log before choosing the next action.'
+            echo
+            if [ "$reason" = 'timeout' ]; then
+              echo 'The run was cancelled or exceeded its time budget. Check the last step in the log.'
+            elif [ "$reason" = 'infra' ]; then
+              echo 'A setup or runner step failed before the model could answer. Check the failed step and the toolchain.'
+            else
+              echo 'The agent step failed. Check the failed step and the model log; if the cause is unclear, treat it as agent_failed.'
+            fi
+          } > "$body"
+          {
+            echo '## OpenCode run failed'
+            echo
+            cat "$body"
+          } >> "$GITHUB_STEP_SUMMARY"
+          gh issue comment "$NUMBER" --repo "$REPO" --body-file "$body"
+          echo "::error::OpenCode ${reason}"
           exit 1

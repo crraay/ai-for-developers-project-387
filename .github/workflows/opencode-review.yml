@@ -67,6 +67,7 @@ jobs:
       actions: read # list prior workflow runs for the per-PR budget
     outputs:
       allowed: ${{ steps.check.outputs.allowed }}
+      code: ${{ steps.check.outputs.code }}
       reason: ${{ steps.check.outputs.reason }}
       used: ${{ steps.check.outputs.used }}
       limit: ${{ steps.check.outputs.limit }}
@@ -203,7 +204,15 @@ jobs:
                 "*--output*": "deny",
                 "*--no-index*": "deny",
                 "*>*": "deny",
-                "*<*": "deny"
+                "*<*": "deny",
+                "*;*": "deny",
+                "*&&*": "deny",
+                "*&*": "deny",
+                "*|*": "deny",
+                "*$*": "deny",
+                "*`*": "deny",
+                "*\n*": "deny",
+                "*\r*": "deny"
               }
             }
         run: |
@@ -214,17 +223,20 @@ jobs:
           Review pull request #${{ github.event.pull_request.number }} in
           ${{ github.repository }} and return the review as Markdown.
 
-          Read AGENTS.md, CODING_STANDARDS.md and docs/agents/review.md
-          before anything else. docs/agents/review.md is the contract: it
-          defines the two axes, the evidence each finding needs, what to do
-          with earlier review threads, and how to finish. Follow it.
+          Read AGENTS.md, CODING_STANDARDS.md, REVIEW.md and
+          docs/agents/review.md before anything else. REVIEW.md holds the
+          calendar/booking invariants; docs/agents/review.md is the contract:
+          it defines the two axes, the evidence each finding needs, what to do
+          with earlier review threads, and how to finish. Follow both.
 
           The pull request number is exported as $PR. Read the request with
           `gh pr view $PR --json number,title,body,baseRefName,headRefName,commits,files`,
           the patch with `gh pr diff $PR`, the earlier conversation with
           `gh pr view $PR --comments`, each linked ticket with `gh issue view`
           and the ticket number, and CI evidence with `gh pr checks $PR`,
-          `gh run view` and the id from a failing check.
+          `gh run view` and the id from a failing check. When the description
+          links a human approval comment, read it with `gh issue view <n>
+          --comments`; if no approval is linked, report that gap.
 
           Shell access is limited to those read commands, and tools cannot
           edit, commit, push, approve, request changes or comment. Report;
@@ -294,6 +306,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
+          CODE: ${{ needs.preflight.outputs.code || 'preflight' }}
           REASON: ${{ needs.preflight.outputs.reason || 'the preflight check did not allow this review' }}
           SHA: ${{ needs.preflight.outputs.sha || github.event.pull_request.head.sha }}
           USED: ${{ needs.preflight.outputs.used }}
@@ -306,10 +319,12 @@ jobs:
           {
             echo '**OpenCode review did not start.**'
             echo
+            echo "- Reason code: \`${CODE}\`"
             printf '%s\n' "${REASON}"
             echo
             echo "- Commit: \`${SHA}\`"
             echo "- Run: ${RUN_URL}"
+            echo '- **Status: needs human.** Do not retry automatically; inspect the log before choosing the next action.'
             if [ -n "${USED:-}" ] && [ -n "${LIMIT:-}" ]; then
               echo "- Budget: ${USED}/${LIMIT} attempts used"
             fi
@@ -317,7 +332,7 @@ jobs:
               echo "- Provider quota: ${QUOTA}"
             fi
             echo
-            echo 'Do not retry this review; raise the limit or wait for the provider window to reset.'
+            echo 'A human chooses the next action: raise the limit, wait for the provider window, or revise the request.'
           } > "$body"
           {
             echo '## OpenCode review stopped'
@@ -326,4 +341,84 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           gh issue comment "$PR" --repo "$REPO" --body-file "$body"
           echo "::error::${REASON}"
+          exit 1
+
+  report:
+    # The preflight passed and the review was allowed to call the model. A
+    # failure after that is classified without a model key: a timeout or
+    # cancellation is `timeout`, a setup/transport step is `infra`, and an
+    # agent-step failure is `agent_failed`.
+    needs: [preflight, review]
+    if: |
+      always() &&
+      needs.preflight.outputs.allowed == 'true' &&
+      (needs.review.result == 'failure' || needs.review.result == 'cancelled')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read # inspect the review job's failed step
+      issues: write # post the reason on the PR
+    steps:
+      - name: Classify and post the review failure
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          SHA: ${{ needs.preflight.outputs.sha || github.event.pull_request.head.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RESULT: ${{ needs.review.result }}
+          TIMEOUT_MINUTES: 15
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          reason=agent_failed
+          if [ "$RESULT" = 'cancelled' ]; then
+            reason=timeout
+          else
+            jobs=$(gh api "repos/$REPO/actions/runs/$RUN_ID/jobs?per_page=100")
+            duration=$(printf '%s\n' "$jobs" | jq -r '
+              .jobs[] | select(.name == "review")
+              | if .completed_at and .started_at
+                then ((.completed_at | fromdateiso8601) - (.started_at | fromdateiso8601))
+                else 0 end
+            ' | head -n 1)
+            if [ "${duration:-0}" -ge $((TIMEOUT_MINUTES * 60 - 60)) ]; then
+              reason=timeout
+            else
+              failed=$(printf '%s\n' "$jobs" | jq -r '
+                .jobs[] | select(.name == "review") | .steps[]
+                | select(.conclusion == "failure") | .name
+              ' | head -n 1)
+              case "${failed:-}" in
+                "Checkout repository"|"Provide the local config's secret file placeholder"|"Install opencode"|"Post the review")
+                  reason=infra
+                  ;;
+              esac
+            fi
+          fi
+
+          body="${RUNNER_TEMP:-/tmp}/review-failure.md"
+          {
+            echo '**OpenCode review failed after the preflight passed.**'
+            echo
+            echo "- Reason code: \`${reason}\`"
+            echo "- Commit: \`${SHA}\`"
+            echo "- Run: ${RUN_URL}"
+            echo '- **Status: needs human.** Do not retry automatically; inspect the log before choosing the next action.'
+            echo
+            if [ "$reason" = 'timeout' ]; then
+              echo 'The review was cancelled or exceeded its time budget. Check the last step in the log.'
+            elif [ "$reason" = 'infra' ]; then
+              echo 'A setup or transport step failed before the review could be posted. Check the failed step and the toolchain.'
+            else
+              echo 'The agent step failed. Check the failed step and the model log; if the cause is unclear, treat it as agent_failed.'
+            fi
+          } > "$body"
+          {
+            echo '## OpenCode review failed'
+            echo
+            cat "$body"
+          } >> "$GITHUB_STEP_SUMMARY"
+          gh issue comment "$PR" --repo "$REPO" --body-file "$body"
+          echo "::error::OpenCode review ${reason}"
           exit 1

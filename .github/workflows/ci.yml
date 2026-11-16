@@ -4,11 +4,11 @@ on:
   push:
     # Branches only — never tags. A bare `push:` matches both, so every
     # release-please tag re-ran this workflow on a commit already built on dev.
-    # The negative pattern also skips release-please's own version-bump branch;
-    # the merge into dev is the real gate and still runs here.
+    # The release-please version-bump branch is included on purpose: the dev
+    # ruleset requires `check` and `smoke` on every PR, including the release PR.
+    # The merge into dev still runs the same gate.
     branches:
       - '**'
-      - '!release-please--**'
   workflow_dispatch:
 
 permissions:

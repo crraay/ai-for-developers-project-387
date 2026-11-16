@@ -137,7 +137,15 @@ jobs:
                 "gh issue view *": "allow",
                 "gh search issues *": "allow",
                 "*>*": "deny",
-                "*<*": "deny"
+                "*<*": "deny",
+                "*;*": "deny",
+                "*&&*": "deny",
+                "*&*": "deny",
+                "*|*": "deny",
+                "*$*": "deny",
+                "*`*": "deny",
+                "*\n*": "deny",
+                "*\r*": "deny"
               }
             }
         run: |

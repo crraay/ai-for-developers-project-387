@@ -194,6 +194,16 @@ hk install --mise
 There is deliberately **no pre-push hook**: run `mise run check` yourself before
 calling a change done. CI runs the same command on every push.
 
+The `dev` branch has a required-check ruleset: `check`, `smoke`, `verify-head`,
+`lint` and `build`. `verify-head` checks out the exact PR head SHA and uploads
+the Playwright trace plus that SHA as an Actions artifact, so the browser
+evidence can be tied to the commit under review.
+
+Prettier uses `endOfLine: "auto"` in `frontend/.prettierrc` so a Windows
+checkout with `core.autocrlf=true` passes without reformatting every file. The
+repository still stores LF; do not change this back to `lf` unless
+`.gitattributes` forces LF for the frontend source at checkout.
+
 Commits follow [Conventional Commits](https://www.conventionalcommits.org)
 (enforced by commitlint in the commit-msg hook and in CI).
 

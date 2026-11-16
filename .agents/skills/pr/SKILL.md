@@ -9,28 +9,14 @@ metadata:
     url: "https://github.com/humanlayer/skills/blob/main/plugins/show-me/skills/show-me/SKILL.md"
 ---
 
-Use this template for writing the PR body:
+Start from the repository's `.github/pull_request_template.md` and fill every
+section. Write `n/a — <reason>` where a section genuinely does not apply; do
+not delete the heading. The template is the source of truth for structure. It
+requires the source issue, spec, tickets and the human approval link, check
+commands with run links and the verified SHA, the risk assessment, and the
+rollback procedure. A body that omits a required section is incomplete.
 
-```markdown
-## Summary
-
-<diagram, diff-sketch, or tree>
-
-## Evidence
-
-- **Before:** <screenshot/output/failing test run>
-  **After:** <screenshot/output/passing test run>
-
-## Merge Danger
-
-**Door:** <one-way or two-way>
-
-<optional: description>
-
-**Blast Radius:** <one-word description>
-
-<optional: potential ramifications of merge>
-```
+The sections below describe what good content looks like.
 
 ## Sections
 
@@ -155,16 +141,32 @@ Place each visual next to the short text it supports. Keep only the calls, files
 
 You may use one of these, you may use several, it is unlikely you will use all of them. Use your judgement and don't overwhelm the user.
 
-### Evidence
+### Source and approval
 
-Concrete evidence that the change works. Show a before and after.
+Link the source request, the spec, every ticket and the comment or document
+where a human approved the scope. Use `Closes #N` for tickets this PR closes,
+`Refs #N` / `Part of #N` otherwise. If approval is unavailable, say so; the
+reviewer treats the change as unapproved rather than inventing consent.
+
+### Checks
+
+Concrete evidence that the change works. Name the commands, link the run and
+record the verified SHA. Show a before and after.
 
 Screenshots are S-tier - when the environment is set up for it and the change is visual.
 
-Execution-based evidence is A-tier. Test results, console output. Show the exact test that now fails and passes, using pseudocode.
+Execution-based evidence is A-tier. Test results, console output. For a bug fix,
+show the new test failing on the base commit and passing after the fix. For a
+new capability, show the check failing without the behaviour and passing with
+it. "Tests passed" without a link is not evidence.
 
-### Merge Danger
+### Risk and rollback
 
 Describe whether it's a one-way or two-way door. You can walk back through two-way doors, but not one-way doors. A PR that is cheap to roll back is lower risk. Changes that involve destructive actions or hard-to-reverse decisions are one-way doors.
 
 The blast radius is the potential impact or scope of the changes introduced by this PR. Consider all possibilities. Examples are layout shift, breakages for consumers, mobile responsiveness, etc.
+
+Name what can break and who is affected, then give the rollback command (a
+`git revert` or equivalent) and the check that proves the previous behaviour is
+back. If data changed, say whether reverting the code is enough and what else is
+needed; application release and deploy rollback are out of scope here.

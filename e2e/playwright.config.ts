@@ -10,7 +10,9 @@ export default defineConfig({
   globalTeardown: require.resolve('./global-teardown.mjs'),
   use: {
     baseURL: 'http://localhost:5173',
-    trace: 'on-first-retry',
+    // The verify-head job sets PLAYWRIGHT_TRACE=on so a successful run also
+    // leaves a trace; the ordinary CI run keeps traces for failures only.
+    trace: process.env.PLAYWRIGHT_TRACE === 'on' ? 'on' : 'retain-on-failure',
   },
   projects: [
     {

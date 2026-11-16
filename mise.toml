@@ -63,14 +63,14 @@ run = [
   # Fixed file list on purpose: hexlet-check.yml is managed externally and must
   # not be edited, so it is excluded by omission rather than by an ignore rule.
   # Accepted findings (scope, reason, expiry) live in .github/jactionlint.yaml.
-  "jactionlint .github/workflows/ci.yml .github/workflows/security.yml .github/workflows/release-please.yml .github/workflows/pr-title.yml .github/workflows/deploy.yml .github/workflows/opencode.yml .github/workflows/opencode-review.yml .github/workflows/opencode-triage.yml .github/workflows/todo-fixme-audit.yml",
+  "jactionlint .github/workflows/ci.yml .github/workflows/security.yml .github/workflows/release-please.yml .github/workflows/pr-title.yml .github/workflows/deploy.yml .github/workflows/opencode.yml .github/workflows/opencode-review.yml .github/workflows/opencode-triage.yml .github/workflows/todo-fixme-audit.yml .github/workflows/verify-head.yml",
   # Issue #38: every ADR must state its status, or the header block stops being a shortcut.
   "node scripts/check-adr-status.mjs",
 ]
 
 [tasks."check:workflows"]
-description = "Agent preflight unit tests: per-PR attempts, re-runs, cancellations, provider quota"
-run = "node --test scripts/opencode-preflight.test.mjs"
+description = "Agent preflight and shell-whitelist tests: attempts, re-runs, quota, metacharacter guards"
+run = "node --test scripts/opencode-preflight.test.mjs scripts/agent-permissions.test.mjs"
 
 [tasks."check:browser"]
 description = "End-to-end browser test: guest books a slot and the host view shows it"

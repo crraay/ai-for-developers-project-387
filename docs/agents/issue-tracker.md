@@ -2,6 +2,10 @@
 
 Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all operations.
 
+> The agent shell denies `|`, `$`, backticks, `;`, `&`, redirects and literal
+> newlines. The `--jq` examples below are for a human shell; inside `/oc`, read
+> the `--json` output directly or use a single filter without a pipe.
+
 ## Conventions
 
 - **Create an issue**: `gh issue create --title "..." --body "..."`. For a multi-line body, write the body to a file first and pass `gh issue create --body-file <file>` — the `/oc` agent's shell denies heredocs and redirects.
