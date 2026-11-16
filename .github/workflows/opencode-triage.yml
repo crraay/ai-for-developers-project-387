@@ -1,0 +1,226 @@
+name: opencode-triage
+
+# Auto-triage of newly opened issues: classify each raw request against the
+# triage skill's state machine and leave it labelled and commented for the
+# maintainer to act on. The agent reads the issue and the codebase, applies one
+# category role (`bug` or `enhancement`) plus one state role, and posts a triage
+# comment; the comment is the agent's final answer, posted by the action itself.
+#
+# `issues: opened` fires for anyone who can open an issue, so this file is
+# defensive in three layers. The trigger is gated at the job level to the
+# repository owner, because the pinned action refuses to run for an actor
+# without write access (`assertPermissions` in packages/opencode/src/cli/cmd/
+# github.ts) — an external reporter's issue would otherwise fail the run with an
+# error comment instead of being triaged. Tickets that are already triaged are
+# skipped by label: anything carrying a state role (`needs-triage`,
+# `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`) was either
+# produced ready by `/to-tickets`/`/to-spec` or already moved, so re-triaging it
+# would overwrite a maintainer's decision. Bot authors are excluded by type.
+#
+# Permissions mirror opencode.yml: the workflow-level `permissions: {}` denies
+# every scope, the job asks only for `contents: read` (checkout) and
+# `id-token: write` (OIDC exchange), and the write-capable OpenCode App token is
+# exchanged before the agent runs and handed to it as GH_TOKEN so it can apply
+# labels and close issues, while the job's own GITHUB_TOKEN stays read-only. The
+# model key is read only by the agent step.
+#
+# The triage skill is interactive — it recommends, then waits for the maintainer
+# to grill and direct. This run has no maintainer, so the prompt narrows it to
+# the autonomous slice: classify conservatively (default `needs-triage`), ask
+# the reporter (`needs-info`) when the request is too thin, close as `wontfix`
+# only when the change already exists, and never promote to `ready-for-agent` or
+# `ready-for-human` — those are a human's call. The agent returns the triage
+# comment as its final answer, so the blockquote disclaimer the skill requires
+# never has to pass through a shell command.
+on:
+  issues:
+    types: [opened]
+
+# Deny every token permission by default; the job asks for the two it needs.
+permissions: {}
+
+# One triage per issue. A redelivered event queues behind the first run instead
+# of re-labelling the same issue, and an in-flight run is never cancelled.
+concurrency:
+  group: opencode-triage-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  triage:
+    # Skip anything not opened by the owner (bots via `type`, and — together
+    # with the action's own permission gate — non-collaborators via `login`),
+    # and skip issues that already carry a triage state role, so `/to-tickets`
+    # and `/to-spec` output passes through untouched.
+    if: |
+      github.event.issue.user.type == 'User' &&
+      github.event.issue.user.login == github.repository_owner &&
+      !contains(github.event.issue.labels.*.name, 'needs-triage') &&
+      !contains(github.event.issue.labels.*.name, 'needs-info') &&
+      !contains(github.event.issue.labels.*.name, 'ready-for-agent') &&
+      !contains(github.event.issue.labels.*.name, 'ready-for-human') &&
+      !contains(github.event.issue.labels.*.name, 'wontfix')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read # checkout of this repository
+      id-token: write # OIDC exchange for the OpenCode App token
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      # opencode.json reads the Render MCP token from .render-api-key, a
+      # gitignored local secret. The config is rejected while that file is
+      # missing, so create an empty placeholder (same as opencode.yml); the
+      # agent has no Render key, does not use the server, and a failed MCP
+      # connection does not stop a run.
+      - name: Provide the local config's secret file placeholder
+        run: touch .render-api-key
+
+      # A write-capable token for the agent's own gh calls, exchanged before the
+      # agent runs so it can apply labels and close issues. The job's
+      # GITHUB_TOKEN stays read-only, and the token is masked and short-lived.
+      # `continue-on-error` degrades a failed exchange to an unauthenticated
+      # (read-only) agent instead of stopping the run: the triage comment is
+      # still posted by the action, only the label/close writes are lost.
+      - name: Exchange App token for the agent
+        id: app-token
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          oidc_url="${ACTIONS_ID_TOKEN_REQUEST_URL:-}"
+          oidc_request_token="${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}"
+          if [ -z "$oidc_url" ] || [ -z "$oidc_request_token" ]; then
+            echo "::error::OIDC is not available; id-token: write is required."
+            exit 1
+          fi
+          oidc=$(curl -fsS \
+            -H "Authorization: bearer $oidc_request_token" \
+            "$oidc_url&audience=opencode-github-action" | jq -r .value)
+          if [ -z "$oidc" ] || [ "$oidc" = null ]; then
+            echo "::error::OIDC token request failed."
+            exit 1
+          fi
+          app=$(curl -fsS -X POST \
+            -H "Authorization: Bearer $oidc" \
+            https://api.opencode.ai/exchange_github_app_token | jq -r .token)
+          if [ -z "$app" ] || [ "$app" = null ]; then
+            echo "::error::OpenCode App token exchange failed."
+            exit 1
+          fi
+          echo "::add-mask::$app"
+          echo "app-token=$app" >> "$GITHUB_OUTPUT"
+
+      - name: Triage with OpenCode
+        uses: anomalyco/opencode/github@77fc88c8ade8e5a620ebbe1197f3a572d29ae91a # latest, 2026-11-13
+        with:
+          model: opencode-go/deepseek-v4.1-flash
+          # The action shares the session by default on a public repo; turn it
+          # off so triage transcripts are never published.
+          share: "false"
+          prompt: |
+            Triage the newly opened issue in ${{ github.repository }} following
+            the triage skill, and return your triage comment as your final
+            answer.
+
+            Read AGENTS.md, GLOSSARY.md, docs/agents/domain.md and
+            docs/agents/issue-tracker.md first, then the triage skill's own
+            files: .agents/skills/triage/SKILL.md (the state machine),
+            .agents/skills/triage/AGENT-BRIEF.md and
+            .agents/skills/triage/OUT-OF-SCOPE.md. The label strings are mapped
+            in docs/agents/triage-labels.md. Follow the skill; where it defers
+            to the maintainer, act autonomously as described below.
+
+            The issue number is ${{ github.event.issue.number }}. Its title and
+            body are already in your prompt; read it with
+            `gh issue view ${{ github.event.issue.number }} --json number,title,body,labels`
+            for the labels if you need them.
+
+            There is no maintainer in this run: you are the whole triage loop.
+            Do not grill (the question tool is denied) and do not write agent
+            briefs. Classify conservatively and leave anything that needs a
+            human's judgment for them.
+
+            1. Gather context. Run the skill's two checks: (a) redundancy —
+               search the codebase (grep/glob/read) for an existing
+               implementation of the requested behaviour by domain concept, not
+               the request's wording, and (b) prior rejection — read every
+               .out-of-scope/*.md and surface any that resembles the request.
+
+            2. Classify. Apply exactly one category label (`bug` or
+               `enhancement`) and exactly one state label via
+               `gh issue edit ${{ github.event.issue.number }} --add-label ...`:
+               - Already implemented (redundancy found): `wontfix`. Close the
+                 issue with `gh issue close ${{ github.event.issue.number }}`
+                 and explain in your final answer where the behaviour lives.
+               - Not enough detail to classify: `needs-info`, and return the
+                 skill's needs-info template as your final answer.
+               - Matches a prior .out-of-scope/ rejection: apply `needs-triage`
+                 and say so in your final answer; a human decides whether to
+                 confirm, reconsider or disagree — do not close.
+               - Otherwise: `needs-triage`, the default first state. Never move
+                 an issue to `ready-for-agent` or `ready-for-human` on your own.
+
+            3. Return the triage comment as your final answer. It must start
+               with the disclaimer blockquote:
+
+               > *This was generated by AI during triage.*
+
+               Follow it with your category/state recommendation and reasoning,
+               the codebase summary relevant to the request (including whether
+               it is already implemented), and any specific question you still
+               need from the reporter.
+
+            The workflow posts your final answer as the issue comment; your `gh`
+            calls apply the labels and close the issue, so do not post a comment
+            yourself. Shell access is limited to `gh issue view`, `gh issue
+            list`, `gh issue edit`, `gh issue close` and `gh repo view`. Do not
+            edit or write any file, do not create issues or pull requests, and
+            do not use the web. Never return an empty answer.
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          # The write-capable App token exchanged above. Naming it GH_TOKEN is
+          # what makes gh and git pick it up; the action's own OIDC path reads
+          # GITHUB_TOKEN (and only when use_github_token is true), so this does
+          # not change how the action posts the answer.
+          GH_TOKEN: ${{ steps.app-token.outputs.app-token }}
+          # Anything that would prompt is denied: `ask` cannot be answered on a
+          # runner. The web and anything outside the checkout are denied, and
+          # shell access is limited to the read and triage-write gh commands —
+          # the agent reads attacker-authored issue bodies, so a write token
+          # must not be usable to run arbitrary commands. Shape is opencode's V1
+          # `permission` object (the 1.19.x binary the action installs), merged
+          # over opencode.json; the last matching key wins, so the wildcard
+          # comes first and the guards come last.
+          OPENCODE_PERMISSION: |
+            {
+              "edit": "deny",
+              "write": "deny",
+              "read": {
+                "*": "allow",
+                "*.env": "deny",
+                "*.env.*": "deny"
+              },
+              "external_directory": "deny",
+              "question": "deny",
+              "task": "deny",
+              "todowrite": "deny",
+              "webfetch": "deny",
+              "websearch": "deny",
+              "bash": {
+                "*": "deny",
+                "gh issue view *": "allow",
+                "gh issue list *": "allow",
+                "gh issue edit *": "allow",
+                "gh issue close *": "allow",
+                "gh repo view *": "allow",
+                "*--output*": "deny",
+                "*--no-index*": "deny",
+                "*>*": "deny",
+                "*<*": "deny",
+                "*;*": "deny",
+                "*&&*": "deny"
+              }
+            }
