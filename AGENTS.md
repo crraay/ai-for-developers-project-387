@@ -4,7 +4,7 @@
 
 ### Commits
 
-Commit messages follow [Conventional Commits](https://www.conventionalcommits.org) — enforced by `commitlint.config.mjs` (commit-msg hk hook) and CI (`commitlint` runs over the pushed range). PR titles follow the same ruleset: `pr-title.yml` pipes the title through `commitlint`, so a title without `type(scope):` fails CI even when every commit is fine. Inside an `/oc` run `gh` is unauthenticated (writes go through the action's App token), so report a title or description that a human must edit instead of looking for a credential.
+Commit messages follow [Conventional Commits](https://www.conventionalcommits.org) — enforced by `commitlint.config.mjs` (commit-msg hk hook) and CI (`commitlint` runs over the pushed range). PR titles follow the same ruleset: `pr-title.yml` pipes the title through `commitlint`, so a title without `type(scope):` fails CI even when every commit is fine. An agent that opens a PR must use a `type(scope):` title (the `/pr` skill produces one) — never a sentence title like `Widened host bookings table; all checks pass.`
 
 Commits and PRs reference their ticket. `Refs #<n>` in the commit body points at the issue the change works on; `Closes #<n>` in the PR description closes it once the acceptance criteria are met; `Part of #<map>` covers work bundled under a decision map (see `docs/agents/issue-tracker.md`). An implementation commit without a referenceable issue is an exception — raise it with a human before merging.
 
@@ -33,6 +33,11 @@ Every non-draft PR authored by the repository owner or `opencode-agent[bot]` is 
 ### Asking the agent in a comment
 
 An `/oc` or `/opencode` mention starts the agent on an issue, a pull request, or a line of a pull request's diff. A comment on a line gets the file, line and diff hunk; the answer is moved from the action's top-level comment into that review thread, so the discussion stays under the line. See `.github/workflows/opencode.yml` and #61.
+
+Inside an `/oc` run the agent has a write-capable `GH_TOKEN` (the OpenCode App token exchanged by the workflow), so `gh`/`git` can apply labels, create issues, push branches and open pull requests. Shell access is limited to `git`, `gh` and `mise run *`; the web, subagents and arbitrary commands are denied. Two conventions keep the loop clean:
+
+- **Return the artifact as your final answer — do not also `gh`-comment it.** The action posts your final answer as a comment automatically, so a separate `gh issue comment` narrating a brief or a "spec published" notice duplicates it and fires a second (skipped) run. Use `gh` only for the actual work product — `gh issue create`, `gh issue edit --add-label`, `gh pr create`, `git push` — not for narration.
+- **Subagents are unavailable.** `task` is denied, so `/implement-spec` runs inline in one window instead of parallelising across a frontier. For a multi-ticket spec, prefer `/to-tickets` and per-ticket `/implement`; reserve `/implement-spec` for a genuinely small spec.
 
 ### Running the application
 

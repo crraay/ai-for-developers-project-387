@@ -16,7 +16,7 @@ The issue tracker and triage label vocabulary should have been provided to you. 
 
 Check with the user that these seams match their expectations.
 
-3. Write the spec using the template below, then publish it to the project issue tracker. Apply the `ready-for-agent` triage label - no need for additional triage.
+3. Write the spec using the template below, then publish it to the project issue tracker. Apply only the `ready-for-agent` triage label — do not copy the source issue's category label (`bug`/`enhancement`), because a spec is neither — no need for additional triage.
 
 <spec-template>
 
@@ -38,7 +38,7 @@ A LONG, numbered list of user stories. Each user story should be in the format o
 1. As a mobile bank customer, I want to see balance on my accounts, so that I can make better informed decisions about my spending
 </user-story-example>
 
-This list of user stories should be extremely extensive and cover all aspects of the feature.
+This list should be comprehensive but proportionate to the change: a narrow fix gets a handful of stories, a large feature gets more. Do not pad a small change to look extensive.
 
 ## Implementation Decisions
 
