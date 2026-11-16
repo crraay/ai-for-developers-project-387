@@ -41,3 +41,15 @@ ignores:
       script the pinned anomalyco/opencode/github action and the todo-fixme-audit
       workflow run; there is no checksummed binary to verify against.
     expires: "2027-05-13"
+  # The review workflow installs the opencode CLI the same way after migrating
+  # off the pinned action (which refused bot-authored PRs). The agent step is
+  # read-only and the review is posted through the OIDC App token, so whoever
+  # controls the opencode release channel controls the review step only, never
+  # the repository's code; the entry expires.
+  - rule: unverified-download
+    file: .github/workflows/opencode-review.yml
+    reason: >-
+      The opencode installer is the only distribution channel and is the same
+      script the pinned anomalyco/opencode/github action and the other audit
+      workflows run; there is no checksummed binary to verify against.
+    expires: "2027-05-13"
