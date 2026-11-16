@@ -26,6 +26,7 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.List;
 import javax.sql.DataSource;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -50,6 +51,19 @@ class RecurringWindowFlowTest {
 
   @BeforeEach
   void clearBookingsAndCreatedWindows() throws Exception {
+    clearWrites();
+  }
+
+  /**
+   * Other test classes assume the seed is the only availability. Leaving a Saturday or Sunday
+   * window behind would make their "weekends have no slots" assertions order-dependent.
+   */
+  @AfterEach
+  void removeCreatedWindowsAndBookings() throws Exception {
+    clearWrites();
+  }
+
+  private void clearWrites() throws Exception {
     try (Connection connection = dataSource.getConnection();
         Statement statement = connection.createStatement()) {
       statement.executeUpdate("DELETE FROM booking");
