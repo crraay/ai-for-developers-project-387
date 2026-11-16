@@ -1,3 +1,9 @@
+/* Data-heavy page: opt into a wider local measure without changing the shared
+   narrow reading column (styles.scss `.page`) used by the other text pages. */
+section.wide {
+  max-width: 72rem;
+}
+
 .ongoing {
   background: #fff8c5;
   border: 1px solid #d4a72c;
@@ -45,7 +51,11 @@
 
 .table-scroll {
   -webkit-overflow-scrolling: touch;
+
+  /* Contain the absolutely positioned visually hidden header, so it cannot
+     extend the document beyond the scroll region on narrow viewports. */
   overflow-x: auto;
+  position: relative;
 
   &:focus-visible {
     outline: 2px solid #0969da;
@@ -56,26 +66,52 @@
 .bookings {
   border-collapse: collapse;
   font-size: 0.95rem;
-  min-width: 48rem;
+  table-layout: auto;
   width: 100%;
 
   th,
   td {
     border-bottom: 1px solid #d0d7de;
-    padding: 0.5rem 0.75rem;
+    padding: 0.4rem 0.6rem;
     text-align: left;
-    vertical-align: top;
+    vertical-align: middle;
   }
 
   th {
+    background: #fff;
     color: #656d76;
     font-weight: 600;
+    white-space: nowrap;
+  }
+
+  /* The Date column survives horizontal scrolling on narrow screens, so a
+     booking's identity stays visible next to its Status and Cancel action. */
+  th:first-child,
+  td:first-child {
+    background: #fff;
+    box-shadow: 1px 0 0 #d0d7de;
+    left: 0;
+    position: sticky;
   }
 
   tr.cancelled td {
+    background: #f6f8fa;
     color: #656d76;
-    text-decoration: line-through;
   }
+}
+
+.nowrap {
+  white-space: nowrap;
+}
+
+.status-cancelled {
+  background: #eaeef2;
+  border-radius: 999px;
+  color: #57606a;
+  display: inline-block;
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 0.05rem 0.5rem;
 }
 
 .visually-hidden {
