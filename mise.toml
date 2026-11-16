@@ -70,7 +70,7 @@ run = [
 
 [tasks."check:workflows"]
 description = "Agent preflight and shell-whitelist tests: attempts, re-runs, quota, metacharacter guards"
-run = "node --test scripts/opencode-preflight.test.mjs scripts/agent-permissions.test.mjs"
+run = "node --test scripts/opencode-preflight.test.mjs scripts/agent-permissions.test.mjs scripts/agent-failure-report.test.mjs"
 
 [tasks."check:browser"]
 description = "End-to-end browser test: guest books a slot and the host view shows it"

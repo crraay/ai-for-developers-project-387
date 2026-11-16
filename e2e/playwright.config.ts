@@ -6,6 +6,8 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   reporter: 'list',
+  // Keep traces and the SHA sidecar in one artifact directory at the repo root.
+  outputDir: '../test-results',
   globalSetup: require.resolve('./global-setup.mjs'),
   globalTeardown: require.resolve('./global-teardown.mjs'),
   use: {

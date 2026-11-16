@@ -428,7 +428,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
-          CODE: ${{ needs.budget.outputs.code || needs.gate.outputs.code || 'preflight' }}
+          CODE: ${{ needs.budget.outputs.code || needs.gate.outputs.code || 'infra' }}
           REASON: ${{ needs.budget.outputs.reason || needs.gate.outputs.reason || 'the preflight check did not allow this run' }}
           SHA: ${{ needs.budget.outputs.sha || needs.gate.outputs.sha || github.sha }}
           USED: ${{ needs.budget.outputs.used }}
@@ -491,58 +491,8 @@ jobs:
           SHA: ${{ needs.gate.outputs.sha || github.sha }}
           RUN_ID: ${{ github.run_id }}
           RESULT: ${{ needs.opencode.result }}
+          JOB_NAME: opencode
           TIMEOUT_MINUTES: 45
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          set -euo pipefail
-          reason=agent_failed
-          if [ "$RESULT" = 'cancelled' ]; then
-            reason=timeout
-          else
-            jobs=$(gh api "repos/$REPO/actions/runs/$RUN_ID/jobs?per_page=100")
-            duration=$(printf '%s\n' "$jobs" | jq -r '
-              .jobs[] | select(.name == "opencode")
-              | if .completed_at and .started_at
-                then ((.completed_at | fromdateiso8601) - (.started_at | fromdateiso8601))
-                else 0 end
-            ' | head -n 1)
-            if [ "${duration:-0}" -ge $((TIMEOUT_MINUTES * 60 - 60)) ]; then
-              reason=timeout
-            else
-              failed=$(printf '%s\n' "$jobs" | jq -r '
-                .jobs[] | select(.name == "opencode") | .steps[]
-                | select(.conclusion == "failure") | .name
-              ' | head -n 1)
-              case "${failed:-}" in
-                "Checkout repository"|"Provide the local config's secret file placeholder"|"Install the pinned toolchain"|"Remember the newest PR comment"|"Exchange App token for the agent"|"Answer in the review thread")
-                  reason=infra
-                  ;;
-              esac
-            fi
-          fi
-
-          body="${RUNNER_TEMP:-/tmp}/agent-failure.md"
-          {
-            echo '**OpenCode failed after the preflight passed.**'
-            echo
-            echo "- Reason code: \`${reason}\`"
-            echo "- Commit: \`${SHA}\`"
-            echo "- Run: ${RUN_URL}"
-            echo '- **Status: needs human.** Do not retry automatically; inspect the log before choosing the next action.'
-            echo
-            if [ "$reason" = 'timeout' ]; then
-              echo 'The run was cancelled or exceeded its time budget. Check the last step in the log.'
-            elif [ "$reason" = 'infra' ]; then
-              echo 'A setup or runner step failed before the model could answer. Check the failed step and the toolchain.'
-            else
-              echo 'The agent step failed. Check the failed step and the model log; if the cause is unclear, treat it as agent_failed.'
-            fi
-          } > "$body"
-          {
-            echo '## OpenCode run failed'
-            echo
-            cat "$body"
-          } >> "$GITHUB_STEP_SUMMARY"
-          gh issue comment "$NUMBER" --repo "$REPO" --body-file "$body"
-          echo "::error::OpenCode ${reason}"
-          exit 1
+          TITLE: OpenCode failed after the preflight passed.
+        run: node scripts/agent-failure-report.mjs

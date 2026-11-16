@@ -119,6 +119,10 @@ repository, which is why the explicit fork gate exists.
 - `scripts/agent-permissions.test.mjs`: every `OPENCODE_PERMISSION` block is
   valid JSON, is deny-by-default, carries the metacharacter guards after the
   allow rules, and the triage workflow cannot rewrite an issue body or title.
+- `scripts/agent-failure-report.test.mjs`: cancelled and timed-out jobs become
+  `timeout`, failed setup/transport steps become `infra`, agent-step failures
+  become `agent_failed`, and the posted body carries the reason, SHA, run link
+  and **Status: needs human**.
 
 The end-to-end check on a scratch PR is: exhaust the budget, confirm the model
 step is skipped and the refusal comment has the reason, SHA and run link;

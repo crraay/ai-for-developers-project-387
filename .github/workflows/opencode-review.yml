@@ -229,11 +229,14 @@ jobs:
           it defines the two axes, the evidence each finding needs, what to do
           with earlier review threads, and how to finish. Follow both.
 
-          The pull request number is exported as $PR. Read the request with
-          `gh pr view $PR --json number,title,body,baseRefName,headRefName,commits,files`,
-          the patch with `gh pr diff $PR`, the earlier conversation with
-          `gh pr view $PR --comments`, each linked ticket with `gh issue view`
-          and the ticket number, and CI evidence with `gh pr checks $PR`,
+          The pull request number is ${{ github.event.pull_request.number }}.
+          Read the request with
+          `gh pr view ${{ github.event.pull_request.number }} --json number,title,body,baseRefName,headRefName,commits,files`,
+          the patch with `gh pr diff ${{ github.event.pull_request.number }}`,
+          the earlier conversation with
+          `gh pr view ${{ github.event.pull_request.number }} --comments`, each
+          linked ticket with `gh issue view` and the ticket number, and CI
+          evidence with `gh pr checks ${{ github.event.pull_request.number }}`,
           `gh run view` and the id from a failing check. When the description
           links a human approval comment, read it with `gh issue view <n>
           --comments`; if no approval is linked, report that gap.
@@ -306,7 +309,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
-          CODE: ${{ needs.preflight.outputs.code || 'preflight' }}
+          CODE: ${{ needs.preflight.outputs.code || 'infra' }}
           REASON: ${{ needs.preflight.outputs.reason || 'the preflight check did not allow this review' }}
           SHA: ${{ needs.preflight.outputs.sha || github.event.pull_request.head.sha }}
           USED: ${{ needs.preflight.outputs.used }}
@@ -363,62 +366,12 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          PR: ${{ github.event.pull_request.number }}
+          NUMBER: ${{ github.event.pull_request.number }}
           SHA: ${{ needs.preflight.outputs.sha || github.event.pull_request.head.sha }}
           RUN_ID: ${{ github.run_id }}
           RESULT: ${{ needs.review.result }}
+          JOB_NAME: review
           TIMEOUT_MINUTES: 15
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          set -euo pipefail
-          reason=agent_failed
-          if [ "$RESULT" = 'cancelled' ]; then
-            reason=timeout
-          else
-            jobs=$(gh api "repos/$REPO/actions/runs/$RUN_ID/jobs?per_page=100")
-            duration=$(printf '%s\n' "$jobs" | jq -r '
-              .jobs[] | select(.name == "review")
-              | if .completed_at and .started_at
-                then ((.completed_at | fromdateiso8601) - (.started_at | fromdateiso8601))
-                else 0 end
-            ' | head -n 1)
-            if [ "${duration:-0}" -ge $((TIMEOUT_MINUTES * 60 - 60)) ]; then
-              reason=timeout
-            else
-              failed=$(printf '%s\n' "$jobs" | jq -r '
-                .jobs[] | select(.name == "review") | .steps[]
-                | select(.conclusion == "failure") | .name
-              ' | head -n 1)
-              case "${failed:-}" in
-                "Checkout repository"|"Provide the local config's secret file placeholder"|"Install opencode"|"Post the review")
-                  reason=infra
-                  ;;
-              esac
-            fi
-          fi
-
-          body="${RUNNER_TEMP:-/tmp}/review-failure.md"
-          {
-            echo '**OpenCode review failed after the preflight passed.**'
-            echo
-            echo "- Reason code: \`${reason}\`"
-            echo "- Commit: \`${SHA}\`"
-            echo "- Run: ${RUN_URL}"
-            echo '- **Status: needs human.** Do not retry automatically; inspect the log before choosing the next action.'
-            echo
-            if [ "$reason" = 'timeout' ]; then
-              echo 'The review was cancelled or exceeded its time budget. Check the last step in the log.'
-            elif [ "$reason" = 'infra' ]; then
-              echo 'A setup or transport step failed before the review could be posted. Check the failed step and the toolchain.'
-            else
-              echo 'The agent step failed. Check the failed step and the model log; if the cause is unclear, treat it as agent_failed.'
-            fi
-          } > "$body"
-          {
-            echo '## OpenCode review failed'
-            echo
-            cat "$body"
-          } >> "$GITHUB_STEP_SUMMARY"
-          gh issue comment "$PR" --repo "$REPO" --body-file "$body"
-          echo "::error::OpenCode review ${reason}"
-          exit 1
+          TITLE: OpenCode review failed after the preflight passed.
+        run: node scripts/agent-failure-report.mjs
