@@ -69,3 +69,11 @@ test('the host booking types page has no accessibility violations', async ({ pag
 
   await expectNoViolations(page);
 });
+
+test('the host availability page has no accessibility violations', async ({ page }) => {
+  await page.goto('/host/availability');
+  await expect(page.getByRole('heading', { name: 'Availability' })).toBeVisible();
+  await expect(page.getByText('Mon–Fri')).toBeVisible();
+
+  await expectNoViolations(page);
+});

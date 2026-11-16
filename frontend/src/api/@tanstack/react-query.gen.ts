@@ -8,16 +8,20 @@ import {
   cancelBookingById,
   createBooking,
   createBookingType,
+  createRecurringWindow,
   deleteBookingType,
+  deleteRecurringWindow,
   getBooking,
   getHostSettings,
   getSlots,
   listActiveBookingTypes,
   listAllBookingTypes,
   listBookings,
+  listRecurringWindows,
   type Options,
   ping,
   updateBookingType,
+  updateRecurringWindow,
 } from '../sdk.gen';
 import type {
   CancelBookingByIdData,
@@ -32,9 +36,15 @@ import type {
   CreateBookingTypeData,
   CreateBookingTypeError,
   CreateBookingTypeResponse,
+  CreateRecurringWindowData,
+  CreateRecurringWindowError,
+  CreateRecurringWindowResponse,
   DeleteBookingTypeData,
   DeleteBookingTypeError,
   DeleteBookingTypeResponse,
+  DeleteRecurringWindowData,
+  DeleteRecurringWindowError,
+  DeleteRecurringWindowResponse,
   GetBookingData,
   GetBookingError,
   GetBookingResponse,
@@ -49,11 +59,16 @@ import type {
   ListAllBookingTypesResponse,
   ListBookingsData,
   ListBookingsResponse,
+  ListRecurringWindowsData,
+  ListRecurringWindowsResponse,
   PingData,
   PingResponse,
   UpdateBookingTypeData,
   UpdateBookingTypeError,
   UpdateBookingTypeResponse,
+  UpdateRecurringWindowData,
+  UpdateRecurringWindowError,
+  UpdateRecurringWindowResponse,
 } from '../types.gen';
 
 export type QueryKey<TOptions extends Options> = [
@@ -364,6 +379,112 @@ export const cancelBookingByIdMutation = (
   > = {
     mutationFn: async (fnOptions) => {
       const { data } = await cancelBookingById({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      });
+      return data;
+    },
+  };
+  return mutationOptions;
+};
+
+export const listRecurringWindowsQueryKey = (options?: Options<ListRecurringWindowsData>) =>
+  createQueryKey('listRecurringWindows', options);
+
+/**
+ * List recurring availability windows
+ */
+export const listRecurringWindowsOptions = (options?: Options<ListRecurringWindowsData>) =>
+  queryOptions<
+    ListRecurringWindowsResponse,
+    DefaultError,
+    ListRecurringWindowsResponse,
+    ReturnType<typeof listRecurringWindowsQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await listRecurringWindows({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      });
+      return data;
+    },
+    queryKey: listRecurringWindowsQueryKey(options),
+  });
+
+/**
+ * Create a recurring availability window
+ */
+export const createRecurringWindowMutation = (
+  options?: Partial<Options<CreateRecurringWindowData>>,
+): UseMutationOptions<
+  CreateRecurringWindowResponse,
+  CreateRecurringWindowError,
+  Options<CreateRecurringWindowData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    CreateRecurringWindowResponse,
+    CreateRecurringWindowError,
+    Options<CreateRecurringWindowData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await createRecurringWindow({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      });
+      return data;
+    },
+  };
+  return mutationOptions;
+};
+
+/**
+ * Delete a recurring availability window
+ */
+export const deleteRecurringWindowMutation = (
+  options?: Partial<Options<DeleteRecurringWindowData>>,
+): UseMutationOptions<
+  DeleteRecurringWindowResponse,
+  DeleteRecurringWindowError,
+  Options<DeleteRecurringWindowData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    DeleteRecurringWindowResponse,
+    DeleteRecurringWindowError,
+    Options<DeleteRecurringWindowData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await deleteRecurringWindow({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      });
+      return data;
+    },
+  };
+  return mutationOptions;
+};
+
+/**
+ * Update a recurring availability window
+ */
+export const updateRecurringWindowMutation = (
+  options?: Partial<Options<UpdateRecurringWindowData>>,
+): UseMutationOptions<
+  UpdateRecurringWindowResponse,
+  UpdateRecurringWindowError,
+  Options<UpdateRecurringWindowData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    UpdateRecurringWindowResponse,
+    UpdateRecurringWindowError,
+    Options<UpdateRecurringWindowData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await updateRecurringWindow({
         ...options,
         ...fnOptions,
         throwOnError: true,

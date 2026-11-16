@@ -4,6 +4,7 @@ import com.callcalendar.domain.SlotUnavailableException;
 import com.callcalendar.service.BookingNotFoundException;
 import com.callcalendar.service.BookingTypeNotFoundException;
 import com.callcalendar.service.InvalidRequestException;
+import com.callcalendar.service.RecurringWindowNotFoundException;
 import io.micronaut.http.HttpResponse;
 import io.micronaut.http.HttpStatus;
 import io.micronaut.http.MediaType;
@@ -35,6 +36,11 @@ public class ApiExceptionHandler {
   @Error(exception = BookingTypeNotFoundException.class, global = true)
   public HttpResponse<ProblemDetail> bookingTypeNotFound(BookingTypeNotFoundException e) {
     return problem(HttpStatus.NOT_FOUND, "Booking type not found", detail(e));
+  }
+
+  @Error(exception = RecurringWindowNotFoundException.class, global = true)
+  public HttpResponse<ProblemDetail> recurringWindowNotFound(RecurringWindowNotFoundException e) {
+    return problem(HttpStatus.NOT_FOUND, "Recurring window not found", detail(e));
   }
 
   @Error(exception = InvalidRequestException.class, global = true)

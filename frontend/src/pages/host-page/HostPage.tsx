@@ -134,6 +134,7 @@ function HostPage() {
     <section className={`page ${styles.wide}`}>
       <h2>Upcoming bookings</h2>
       <p>
+        <Link to="/host/availability">Manage availability</Link> ·{' '}
         <Link to="/host/booking-types">Manage booking types</Link>
       </p>
 

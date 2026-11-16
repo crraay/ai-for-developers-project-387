@@ -5,6 +5,7 @@ import BookFormPage from './pages/book-form-page/BookFormPage';
 import BookPage from './pages/book-page/BookPage';
 import BookingPage from './pages/booking-page/BookingPage';
 import HomePage from './pages/home-page/HomePage';
+import HostAvailabilityPage from './pages/host-availability-page/HostAvailabilityPage';
 import HostBookingTypesPage from './pages/host-booking-types-page/HostBookingTypesPage';
 import HostPage from './pages/host-page/HostPage';
 
@@ -49,6 +50,7 @@ function App() {
           <Route path="/book/:start" element={<BookFormPage />} />
           <Route path="/booking/:token" element={<BookingPage />} />
           <Route path="/host" element={<HostPage />} />
+          <Route path="/host/availability" element={<HostAvailabilityPage />} />
           <Route path="/host/booking-types" element={<HostBookingTypesPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

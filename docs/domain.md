@@ -52,7 +52,11 @@ For the duration `d` of the chosen booking type, a valid slot start is:
 5. A blackout that overlaps existing active bookings requires an explicit host
    choice: abort the blackout, or save it and cancel the overlapping bookings.
    Never automatic, never silent.
-6. Blackouts and cancellations never alter past bookings.
+6. Changes to availability — adding, editing, shortening or deleting a
+   recurring window, and blackouts or cancellations — never modify or cancel
+   existing bookings on their own. A booking that no longer sits inside any
+   window keeps its state and stays cancellable. The one exception is a
+   blackout conflict, where invariant #5 requires an explicit host choice.
 7. A booking has exactly two states: `active` and `cancelled`. No "completed",
    no "no-show".
 

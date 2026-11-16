@@ -15,9 +15,15 @@ import type {
   CreateBookingTypeData,
   CreateBookingTypeErrors,
   CreateBookingTypeResponses,
+  CreateRecurringWindowData,
+  CreateRecurringWindowErrors,
+  CreateRecurringWindowResponses,
   DeleteBookingTypeData,
   DeleteBookingTypeErrors,
   DeleteBookingTypeResponses,
+  DeleteRecurringWindowData,
+  DeleteRecurringWindowErrors,
+  DeleteRecurringWindowResponses,
   GetBookingData,
   GetBookingErrors,
   GetBookingResponses,
@@ -32,11 +38,16 @@ import type {
   ListAllBookingTypesResponses,
   ListBookingsData,
   ListBookingsResponses,
+  ListRecurringWindowsData,
+  ListRecurringWindowsResponses,
   PingData,
   PingResponses,
   UpdateBookingTypeData,
   UpdateBookingTypeErrors,
   UpdateBookingTypeResponses,
+  UpdateRecurringWindowData,
+  UpdateRecurringWindowErrors,
+  UpdateRecurringWindowResponses,
 } from './types.gen';
 
 export type Options<
@@ -197,6 +208,67 @@ export const cancelBookingById = <ThrowOnError extends boolean = false>(
     CancelBookingByIdErrors,
     ThrowOnError
   >({ url: '/api/host/bookings/{id}/cancel', ...options });
+
+/**
+ * List recurring availability windows
+ */
+export const listRecurringWindows = <ThrowOnError extends boolean = false>(
+  options?: Options<ListRecurringWindowsData, ThrowOnError>,
+): RequestResult<ListRecurringWindowsResponses, unknown, ThrowOnError> =>
+  (options?.client ?? client).get<ListRecurringWindowsResponses, unknown, ThrowOnError>({
+    url: '/api/host/recurring-windows',
+    ...options,
+  });
+
+/**
+ * Create a recurring availability window
+ */
+export const createRecurringWindow = <ThrowOnError extends boolean = false>(
+  options: Options<CreateRecurringWindowData, ThrowOnError>,
+): RequestResult<CreateRecurringWindowResponses, CreateRecurringWindowErrors, ThrowOnError> =>
+  (options.client ?? client).post<
+    CreateRecurringWindowResponses,
+    CreateRecurringWindowErrors,
+    ThrowOnError
+  >({
+    url: '/api/host/recurring-windows',
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+  });
+
+/**
+ * Delete a recurring availability window
+ */
+export const deleteRecurringWindow = <ThrowOnError extends boolean = false>(
+  options: Options<DeleteRecurringWindowData, ThrowOnError>,
+): RequestResult<DeleteRecurringWindowResponses, DeleteRecurringWindowErrors, ThrowOnError> =>
+  (options.client ?? client).delete<
+    DeleteRecurringWindowResponses,
+    DeleteRecurringWindowErrors,
+    ThrowOnError
+  >({ url: '/api/host/recurring-windows/{id}', ...options });
+
+/**
+ * Update a recurring availability window
+ */
+export const updateRecurringWindow = <ThrowOnError extends boolean = false>(
+  options: Options<UpdateRecurringWindowData, ThrowOnError>,
+): RequestResult<UpdateRecurringWindowResponses, UpdateRecurringWindowErrors, ThrowOnError> =>
+  (options.client ?? client).put<
+    UpdateRecurringWindowResponses,
+    UpdateRecurringWindowErrors,
+    ThrowOnError
+  >({
+    url: '/api/host/recurring-windows/{id}',
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+  });
 
 /**
  * Connectivity check used to prove frontend/backend wiring

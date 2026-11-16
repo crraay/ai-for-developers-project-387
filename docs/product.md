@@ -24,6 +24,10 @@ The host sets their timezone, defines the booking types guests can pick from
 (title, description, duration — see `GLOSSARY.md`), and manages availability:
 recurring windows (weekly, via rrule), one-off windows, and blackouts.
 
+- The host manages weekly recurring windows at `/host/availability`: create,
+  edit (days plus start/end time in the host timezone) and delete. Changes are
+  visible on the next guest slot browse, and never modify or cancel an existing
+  booking.
 - When a new blackout overlaps existing active bookings, the host must choose:
   abort the blackout, or save it and cancel the overlapping bookings.
 

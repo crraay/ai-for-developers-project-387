@@ -16,6 +16,8 @@ tags:
     description: Host-only booking operations
   - name: host-settings
     description: Public host settings
+  - name: host-availability
+    description: Host-managed recurring availability windows
 paths:
   /api/booking-types:
     get:
@@ -282,6 +284,106 @@ paths:
                 $ref: '#/components/schemas/ProblemDetail'
       tags:
         - host-bookings
+  /api/host/recurring-windows:
+    get:
+      operationId: listRecurringWindows
+      summary: List recurring availability windows
+      parameters: []
+      responses:
+        '200':
+          description: Every recurring window, ordered by id ascending
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RecurringWindowResponse'
+      tags:
+        - host-availability
+    post:
+      operationId: createRecurringWindow
+      summary: Create a recurring availability window
+      parameters: []
+      responses:
+        '201':
+          description: The created recurring window
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecurringWindowResponse'
+        '400':
+          description: Empty or unknown days, malformed times, or an end time not after the start time (a window may not cross midnight)
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+      tags:
+        - host-availability
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecurringWindowRequest'
+  /api/host/recurring-windows/{id}:
+    put:
+      operationId: updateRecurringWindow
+      summary: Update a recurring availability window
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: The updated recurring window
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecurringWindowResponse'
+        '400':
+          description: Empty or unknown days, malformed times, or an end time not after the start time (a window may not cross midnight)
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '404':
+          description: No recurring window with this id
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+      tags:
+        - host-availability
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecurringWindowRequest'
+    delete:
+      operationId: deleteRecurringWindow
+      summary: Delete a recurring availability window
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '204':
+          description: Window deleted
+        '404':
+          description: No recurring window with this id
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+      tags:
+        - host-availability
   /api/ping:
     get:
       operationId: ping
@@ -487,6 +589,42 @@ components:
         detail:
           type: string
       description: RFC 7807 problem detail; served as application/problem+json.
+    RecurringWindowRequest:
+      type: object
+      required:
+        - daysOfWeek
+        - startTime
+        - endTime
+      properties:
+        daysOfWeek:
+          type: array
+          items:
+            type: string
+        startTime:
+          type: string
+        endTime:
+          type: string
+      description: Body of POST/PUT /api/host/recurring-windows. Fields are nullable because input is untrusted.
+    RecurringWindowResponse:
+      type: object
+      required:
+        - id
+        - daysOfWeek
+        - startTime
+        - endTime
+      properties:
+        id:
+          type: integer
+          format: int64
+        daysOfWeek:
+          type: array
+          items:
+            type: string
+        startTime:
+          type: string
+        endTime:
+          type: string
+      description: A host-managed weekly availability window. `daysOfWeek` holds RFC 5545 day codes (MO…SU), deduplicated and ordered Monday-to-Sunday; `startTime`/`endTime` are host-local HH:mm wall-clock times with `endTime` strictly after `startTime` on the same day (a window never crosses midnight).
     UpdateBookingTypeRequest:
       type: object
       required:
