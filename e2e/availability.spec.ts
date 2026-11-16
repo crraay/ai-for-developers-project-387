@@ -76,6 +76,7 @@ test('deleting a window never cancels a booking and stops new slots', async ({ p
   await expect(dialog).toContainText('Delete this availability window?');
   await dialog.getByRole('button', { name: 'Delete' }).click();
   await expect(page.getByRole('row', { name: /Sat/ })).toHaveCount(0);
+  await expect(dialog).toBeHidden();
 
   // No new slots appear in the deleted window...
   const closed = await page.request.get(`${API}/api/slots?date=${saturday}&bookingTypeId=${typeId}`);

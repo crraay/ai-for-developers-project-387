@@ -137,8 +137,7 @@ function HostAvailabilityPage() {
   const remove = useMutation({
     ...deleteRecurringWindowMutation(),
     onSuccess: () => {
-      setConfirmingDeleteId(null);
-      setDeleteError(null);
+      closeDelete();
       void queryClient.invalidateQueries({ queryKey: listRecurringWindowsQueryKey() });
     },
     onError: (error) => setDeleteError(errorMessage(error, 'Deleting the window failed.')),

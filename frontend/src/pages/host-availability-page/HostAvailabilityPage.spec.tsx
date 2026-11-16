@@ -117,6 +117,27 @@ describe('HostAvailabilityPage', () => {
     expect(await screen.findByText(/No availability windows yet/)).toBeInTheDocument();
   });
 
+  it('shows the loading state until the windows arrive', async () => {
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.use(
+      http.get(`${API}/api/host-settings`, () => HttpResponse.json({ timezone: TIMEZONE })),
+      http.get(`${API}/api/host/recurring-windows`, async () => {
+        await gate;
+        return HttpResponse.json([asWindow({ id: 1 })]);
+      }),
+    );
+    renderWithProviders(<HostAvailabilityPage />);
+
+    expect(screen.getByText('Loading…')).toBeInTheDocument();
+    release?.();
+
+    expect(await screen.findByText('Mon–Fri')).toBeInTheDocument();
+    expect(screen.queryByText('Loading…')).not.toBeInTheDocument();
+  });
+
   it('POSTs the new window with the chosen days and times', async () => {
     const user = userEvent.setup();
     const { requests } = serve([asWindow({ id: 1 })]);
