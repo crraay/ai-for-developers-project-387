@@ -109,14 +109,16 @@ jobs:
         if: steps.preflight.outputs.allowed == 'true'
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
           # The job's GITHUB_TOKEN carries only `issues: write` on top of
-          # `contents: read`, so the whitelisted `gh issue edit`/`gh issue
-          # close` can label and close but nothing else can write. Naming it
+          # `contents: read`, so the whitelisted issue-edit script can label
+          # and close the event issue but nothing else can write. Naming it
           # GH_TOKEN is what makes `gh` pick it up.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Anything that would prompt is denied: `ask` cannot be answered on a
           # runner. The web and anything outside the checkout are denied, and
-          # shell access is limited to the read and triage-write gh commands —
+          # shell access is limited to the read gh commands and the validated issue-edit
+# script -
           # the agent reads reporter-authored issue bodies, so a write token
           # must not be usable to run arbitrary commands. Shape is opencode's V1
           # `permission` object (the installed binary), merged over opencode.json;
@@ -142,7 +144,6 @@ jobs:
                 "gh issue view *": "allow",
                 "gh issue list *": "allow",
                 "node scripts/agent-issue-edit.mjs *": "allow",
-                "gh issue close *": "allow",
                 "*--output*": "deny",
                 "*--no-index*": "deny",
                 "*>*": "deny",
@@ -197,7 +198,8 @@ jobs:
              `--add-label bug,needs-triage`). The script rejects any other
              flag, including body and title flags:
              - Already implemented (redundancy found): `wontfix`. Close the
-               issue with `gh issue close ${{ github.event.issue.number }}`
+               issue with
+               `node scripts/agent-issue-edit.mjs ${{ github.event.issue.number }} --close`
                and explain in your final answer where the behaviour lives.
              - Not enough detail to classify: `needs-info`, and return the
                skill's needs-info template as your final answer.
@@ -218,12 +220,12 @@ jobs:
              need from the reporter.
 
           The workflow captures your final answer and posts it as the issue
-          comment; the issue-edit script applies the labels and `gh issue
-          close` closes the issue, so do not post a comment yourself. Shell
-          access is limited to `gh issue view`, `gh issue list`, `gh issue
-          close` and `node scripts/agent-issue-edit.mjs`. Do not edit or write
-          any file, do not create issues or pull requests, and do not use the
-          web. Never return an empty answer.
+          comment; the issue-edit script applies the labels and/or closes the
+          issue, so do not post a comment yourself. Shell access is limited to
+          `gh issue view`, `gh issue list` and
+          `node scripts/agent-issue-edit.mjs`. Do not edit or write any file,
+          do not create issues or pull requests, and do not use the web. Never
+          return an empty answer.
           PROMPT
           if [ ! -s "$tmp/triage-comment.md" ]; then
             echo "::warning::The agent returned no triage comment."

@@ -97,4 +97,10 @@ test('triage edits labels only through the validated script', () => {
     ),
     'triage does not allow raw gh issue edit',
   );
+  assert.ok(
+    !entries.some(
+      ([key, value]) => value === 'allow' && key.startsWith('gh issue close'),
+    ),
+    'triage does not allow raw gh issue close',
+  );
 });
