@@ -25,6 +25,7 @@ spec/tickets and the links below.
 ## Checks
 
 - [ ] `mise run check` (or the exact subset run) — command:
+- [ ] Commit messages pass `mise run check:commits`
 - [ ] Red/green evidence for a bug fix: the test fails on the base commit and passes after the fix
 - [ ] For a new capability: the check fails without the new behaviour and passes with it
 - [ ] Generated files regenerated with `mise run generate` and committed

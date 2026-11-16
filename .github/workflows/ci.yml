@@ -39,12 +39,15 @@ jobs:
       - name: mise run check
         run: mise run check
 
-      # Lint the commits this push adds. On a branch push, `before..sha` stops
-      # being that once the branch merges the default branch: it re-lints the
-      # merged-in commits, so a message that already landed (and was gated) on
-      # the default branch fails every branch that merges it. Compare against
-      # the default branch instead; a push to the default branch keeps the
-      # pushed-range semantics.
+      # `mise run check` already lints commits ahead of the default branch
+      # (`check:commits`). This step keeps the pushed-range semantics for a push
+      # to the default branch, where there is no branch range to compare.
+      #
+      # On a branch push, `before..sha` stops being that once the branch merges
+      # the default branch: it re-lints the merged-in commits, so a message that
+      # already landed (and was gated) on the default branch fails every branch
+      # that merges it. Compare against the default branch instead; a push to
+      # the default branch keeps the pushed-range semantics.
       - name: Conventional Commits on the pushed range
         if: github.event_name == 'push' && github.event.before != '0000000000000000000000000000000000000000'
         env:

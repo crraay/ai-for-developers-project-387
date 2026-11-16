@@ -307,6 +307,58 @@ jobs:
               }
             }
 
+      # The pinned action creates an issue-run PR itself, using the model's
+      # summary as the title. That title is a sentence, not a Conventional
+      # Commit, so pr-title.yml goes red before a human sees the PR. Rename it
+      # to the newest commit subject that commitlint accepts; the action's own
+      # summary commit (when the worktree was dirty) is not conventional and is
+      # skipped. A line comment runs on an existing PR, whose title is usually
+      # already valid, so this is a no-op there.
+      - name: Normalise an auto-created pull request title
+        if: ${{ !cancelled() && steps.agent.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.app-token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "No App token; leaving the PR title unchanged."
+            exit 0
+          fi
+          branch="$(git rev-parse --abbrev-ref HEAD)"
+          if [ "$branch" = "HEAD" ]; then
+            echo "Detached HEAD; no PR to rename."
+            exit 0
+          fi
+          number="$(gh pr list --repo "$REPO" --head "$branch" --state open --json number --jq '.[0].number // empty')"
+          if [ -z "$number" ]; then
+            echo "No open PR for $branch; nothing to rename."
+            exit 0
+          fi
+          cli="node_modules/@commitlint/cli/cli.js"
+          if [ ! -f "$cli" ]; then
+            echo "commitlint is not installed; leaving PR #$number unchanged."
+            exit 0
+          fi
+          title="$(gh pr view "$number" --repo "$REPO" --json title --jq .title)"
+          if printf '%s\n' "$title" | node "$cli" >/dev/null 2>&1; then
+            echo "PR #$number already has a conventional title."
+            exit 0
+          fi
+          subject=""
+          while IFS= read -r candidate; do
+            if [ -n "$candidate" ] && printf '%s\n' "$candidate" | node "$cli" >/dev/null 2>&1; then
+              subject="$candidate"
+              break
+            fi
+          done <<< "$(git log --format=%s -n 20)"
+          if [ -z "$subject" ]; then
+            echo "::warning::PR #$number has no conventional commit subject to use as a title."
+            exit 0
+          fi
+          gh pr edit "$number" --repo "$REPO" --title "$subject"
+          echo "Renamed PR #$number to: $subject"
+
       # Move the answer into the line's thread. A reply needs a write-capable
       # token, and the job's GITHUB_TOKEN stays read-only, so exchange a fresh
       # OIDC token for the same App token the action used. The action revokes

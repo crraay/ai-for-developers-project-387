@@ -33,6 +33,10 @@ run = [
 # Checks. `mise run check` runs everything; CI runs exactly this command.
 # ---------------------------------------------------------------------------
 
+[tasks."check:commits"]
+description = "Conventional Commits on the commits ahead of the base branch"
+run = "node scripts/check-commits.mjs"
+
 [tasks."check:backend"]
 description = "Spotless format gate, compile (Error Prone + NullAway), JUnit + Testcontainers"
 dir = "backend"
@@ -70,8 +74,8 @@ run = [
 ]
 
 [tasks."check:workflows"]
-description = "Agent preflight and shell-whitelist tests: attempts, re-runs, quota, metacharacter guards"
-run = "node --test scripts/opencode-preflight.test.mjs scripts/agent-permissions.test.mjs scripts/agent-failure-report.test.mjs scripts/agent-issue-edit.test.mjs"
+description = "Agent preflight, shell-whitelist and commit-gate tests: attempts, re-runs, quota, metacharacter guards"
+run = "node --test scripts/opencode-preflight.test.mjs scripts/agent-permissions.test.mjs scripts/agent-failure-report.test.mjs scripts/agent-issue-edit.test.mjs scripts/check-commits.test.mjs"
 
 [tasks."check:browser"]
 description = "End-to-end browser test: guest books a slot and the host view shows it"
@@ -82,8 +86,8 @@ depends = ["check:backend", "check:frontend"]
 run = "npm run test:e2e"
 
 [tasks.check]
-description = "Every check: backend, frontend, contracts, repo hygiene, agent preflight, browser test, generated-code freshness"
-depends = ["check:backend", "check:frontend", "check:contracts", "check:repo", "check:workflows", "check:browser"]
+description = "Every check: commits, backend, frontend, contracts, repo hygiene, agent preflight, browser test, generated-code freshness"
+depends = ["check:commits", "check:backend", "check:frontend", "check:contracts", "check:repo", "check:workflows", "check:browser"]
 # runs only when all dependencies pass: regenerate and verify committed output is fresh
 run = "mise run check:generated"
 
