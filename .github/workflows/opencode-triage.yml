@@ -22,8 +22,9 @@ name: opencode-triage
 # carries the narrowest write scope there is — `issues: write` — and nothing
 # else; `contents` stays read-only, so the agent can label and close issues but
 # cannot touch code, releases or secrets. The model key (OPENCODE_API_KEY) is
-# read only by the agent step, and the agent's shell whitelist closes off
-# arbitrary commands, because it reads reporter-authored issue bodies.
+# read only by the provider preflight and the agent step, and the agent's shell
+# whitelist closes off arbitrary commands, because it reads reporter-authored
+# issue bodies.
 #
 # The triage skill is interactive — it recommends, then waits for the maintainer
 # to grill and direct. This run has no maintainer, so the prompt narrows it to
@@ -38,6 +39,8 @@ on:
   issues:
     types: [opened]
 
+run-name: "opencode-triage-issue-${{ github.event.issue.number }}"
+
 # Deny every token permission by default; the job asks for the two it needs.
 permissions: {}
 
@@ -46,14 +49,18 @@ permissions: {}
 concurrency:
   group: opencode-triage-${{ github.event.issue.number }}
   cancel-in-progress: false
+  queue: max
 
 jobs:
   triage:
     # Skip bot authors (via `type`) and skip issues that already carry a triage
     # state role, so `/to-tickets` and `/to-spec` output passes through
-    # untouched.
+    # untouched. The global switch and the per-issue pause label stop future
+    # runs without cancelling one already in flight.
     if: |
+      vars.OPENCODE_DISABLED != 'true' &&
       github.event.issue.user.type == 'User' &&
+      !contains(github.event.issue.labels.*.name, 'agent-paused') &&
       !contains(github.event.issue.labels.*.name, 'needs-triage') &&
       !contains(github.event.issue.labels.*.name, 'needs-info') &&
       !contains(github.event.issue.labels.*.name, 'ready-for-agent') &&
@@ -79,9 +86,19 @@ jobs:
       - name: Provide the local config's secret file placeholder
         run: touch .render-api-key
 
+      # Provider quota is account-wide. Check it before installing or running
+      # the model; the refusal is posted below with the reason and run link.
+      - name: Check provider quota
+        id: preflight
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          QUOTA_PERCENT: ${{ vars.OPENCODE_PROVIDER_QUOTA_PERCENT || 95 }}
+        run: node scripts/opencode-preflight.mjs --provider
+
       # Same install path as the pinned action, without its event-driven runner
       # or its unauthenticated version check against api.github.com.
       - name: Install opencode
+        if: steps.preflight.outputs.allowed == 'true'
         run: |
           set -euo pipefail
           curl -fsSL https://opencode.ai/install | bash
@@ -89,6 +106,7 @@ jobs:
 
       - name: Triage with OpenCode
         id: agent
+        if: steps.preflight.outputs.allowed == 'true'
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           # The job's GITHUB_TOKEN carries only `issues: write` on top of
@@ -200,6 +218,43 @@ jobs:
           if [ ! -s "$tmp/triage-comment.md" ]; then
             echo "::warning::The agent returned no triage comment."
           fi
+
+      # Provider quota exhausted: leave the reason, SHA and run link instead
+      # of silently skipping the issue.
+      - name: Post the provider refusal
+        if: steps.preflight.outputs.allowed == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          ISSUE: ${{ github.event.issue.number }}
+          REASON: ${{ steps.preflight.outputs.reason || 'the provider quota check did not allow this run' }}
+          QUOTA: ${{ steps.preflight.outputs.quota }}
+          SHA: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          body="${RUNNER_TEMP:-/tmp}/refusal.md"
+          {
+            echo '**OpenCode triage did not start.**'
+            echo
+            printf '%s\n' "${REASON}"
+            echo
+            echo "- Commit: \`${SHA}\`"
+            echo "- Run: ${RUN_URL}"
+            if [ -n "${QUOTA:-}" ]; then
+              echo "- Provider quota: ${QUOTA}"
+            fi
+            echo
+            echo 'Do not retry this triage; wait for the provider window to reset.'
+          } > "$body"
+          {
+            echo '## OpenCode triage stopped'
+            echo
+            cat "$body"
+          } >> "$GITHUB_STEP_SUMMARY"
+          gh issue comment "$ISSUE" --repo "$REPO" --body-file "$body"
+          echo "::error::${REASON}"
+          exit 1
 
       # The comment is posted here, not by the agent, so its `>` blockquote
       # disclaimer never has to survive the agent's bash whitelist (which denies

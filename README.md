@@ -226,12 +226,12 @@ Actions tab instead.
 The command workflow is
 [`.github/workflows/opencode.yml`](.github/workflows/opencode.yml). It runs on
 `issue_comment` and `pull_request_review_comment`, each limited to
-`types: [created]`, and starts only when a trusted participant (owner or
-collaborator) comments `/oc` or `/opencode` on an issue, a pull request, or a
-line of a pull request's diff. Bot comments are ignored, and the workflow's own
-token cannot write. The model is `opencode-go/deepseek-v4.1-flash`; the API key
-lives in the `OPENCODE_API_KEY` repository secret. The run posts the agent's
-answer as a comment (and, for a line comment, moves it into that line's thread).
+`types: [created]`, and starts only when the repository owner comments `/oc` or
+`/opencode` on an issue, a pull request, or a line of a pull request's diff.
+Bot comments are ignored, and the workflow's own token cannot write. The model
+is `opencode-go/deepseek-v4.1-flash`; the API key lives in the
+`OPENCODE_API_KEY` repository secret. The run posts the agent's answer as a
+comment (and, for a line comment, moves it into that line's thread).
 A companion workflow,
 [`.github/workflows/opencode-review.yml`](.github/workflows/opencode-review.yml),
 reviews each non-draft PR authored by the owner or the agent bot. A third,
@@ -242,6 +242,16 @@ to follow the triage skill (`.agents/skills/triage/`) — applying a
 `bug`/`enhancement` category plus a state label and posting a triage comment.
 Tickets produced by `/to-tickets` and `/to-spec` already carry `ready-for-agent`
 and so pass through untouched.
+
+Agent runs are guarded by three separate controls: a secret-free fork/pause
+gate, the provider's account-wide quota (`GET https://opencode.ai/zen/go/v1/usage`)
+and a per-PR attempt budget (`OPENCODE_RUN_BUDGET`, default 10, and
+`OPENCODE_REVIEW_BUDGET`, default 20). A refused run skips the model and posts
+the reason, head SHA and run link. `OPENCODE_DISABLED=true` stops new runs
+globally and the `agent-paused` label stops them for one PR or issue. The
+semantics, including why a re-run consumes another attempt and why
+`timeout-minutes` is not a budget, are in
+[docs/agents/agent-runs.md](docs/agents/agent-runs.md).
 
 Agent sessions are **not shared**: all three workflows set `share: "false"` so a
 run's transcript is never published (the action would otherwise share it by

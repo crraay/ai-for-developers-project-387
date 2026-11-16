@@ -12,6 +12,7 @@ permissions:
 concurrency:
   group: deploy
   cancel-in-progress: false # never interrupt a deploy already in flight
+  queue: max # keep every manually dispatched deploy waiting, not just the last
 
 jobs:
   deploy:

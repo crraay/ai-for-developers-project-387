@@ -8,6 +8,12 @@ The review is posted as a PR comment. It is **advisory**: it is not a required
 check, and a failed run never fails the pull request. A human still decides what
 merges.
 
+Each review passes a provider quota check and a per-PR attempt budget
+(`OPENCODE_REVIEW_BUDGET`, default 20) before the model runs; see
+[agent-runs.md](agent-runs.md). A re-run consumes another attempt and a
+cancelled attempt stays counted. A refused review posts the reason, head SHA and
+run link instead of calling the model.
+
 This file is the contract for that review. The two axes below are the ones in
 the `code-review` skill; when the skill and this file disagree, this file wins.
 

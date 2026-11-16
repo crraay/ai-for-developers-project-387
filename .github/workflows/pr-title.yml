@@ -11,7 +11,8 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+  # A re-run must not cancel a newer title check on the same PR.
+  cancel-in-progress: ${{ github.run_attempt == 1 }}
 
 jobs:
   lint:

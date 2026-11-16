@@ -68,6 +68,10 @@ run = [
   "node scripts/check-adr-status.mjs",
 ]
 
+[tasks."check:workflows"]
+description = "Agent preflight unit tests: per-PR attempts, re-runs, cancellations, provider quota"
+run = "node --test scripts/opencode-preflight.test.mjs"
+
 [tasks."check:browser"]
 description = "End-to-end browser test: guest books a slot and the host view shows it"
 # The browser test builds the backend and frontend Docker images, so wait for
@@ -77,8 +81,8 @@ depends = ["check:backend", "check:frontend"]
 run = "npm run test:e2e"
 
 [tasks.check]
-description = "Every check: backend, frontend, contracts, repo hygiene, browser test, generated-code freshness"
-depends = ["check:backend", "check:frontend", "check:contracts", "check:repo", "check:browser"]
+description = "Every check: backend, frontend, contracts, repo hygiene, agent preflight, browser test, generated-code freshness"
+depends = ["check:backend", "check:frontend", "check:contracts", "check:repo", "check:workflows", "check:browser"]
 # runs only when all dependencies pass: regenerate and verify committed output is fresh
 run = "mise run check:generated"
 

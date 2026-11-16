@@ -21,8 +21,8 @@ name: security
 # vulnerabilities, so the job asks for the narrowest write scope there is —
 # `issues: write` — and nothing else. `contents` stays read-only, so the agent
 # can file an issue but cannot touch code, releases, or secrets. The model key
-# (OPENCODE_API_KEY) is read only by the agent step, and the agent runs only
-# when the scanner found vulnerabilities.
+# (OPENCODE_API_KEY) is read only by the provider preflight and the agent step,
+# and both run only when the scanner found vulnerabilities.
 #
 # The pinned github action is not used here for the same reason as in
 # todo-fixme-audit.yml: for schedule/workflow_dispatch it checks out a
@@ -51,6 +51,7 @@ permissions: {}
 concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: false
+  queue: max # keep every scheduled or manual audit, not only the last pending one
 
 jobs:
   osv-scanner:
@@ -146,8 +147,43 @@ jobs:
           fi
           exit 1
 
+      # Provider quota is account-wide. A findings run still needs the model to
+      # triage, so check it before installing or calling the model; a refused
+      # run is made visible below and the artifact upload still keeps the
+      # scanner report.
+      - name: Check provider quota
+        id: preflight
+        if: ${{ steps.classify.outputs.outcome == 'findings' && vars.OPENCODE_DISABLED != 'true' }}
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          QUOTA_PERCENT: ${{ vars.OPENCODE_PROVIDER_QUOTA_PERCENT || 95 }}
+        run: node scripts/opencode-preflight.mjs --provider
+
+      - name: Record the disabled agent
+        if: ${{ steps.classify.outputs.outcome == 'findings' && vars.OPENCODE_DISABLED == 'true' }}
+        run: |
+          set -euo pipefail
+          printf 'OPENCODE_DISABLED=true: finding triage skipped.\n' > .osv-audit/agent-disabled.txt
+          echo "::warning::OPENCODE_DISABLED=true: finding triage skipped." >&2
+
+      - name: Fail when the provider quota blocks triage
+        if: ${{ steps.classify.outputs.outcome == 'findings' && steps.preflight.outputs.allowed == 'false' }}
+        env:
+          REASON: ${{ steps.preflight.outputs.reason }}
+          QUOTA: ${{ steps.preflight.outputs.quota }}
+        run: |
+          set -euo pipefail
+          {
+            printf '%s\n' "${REASON:-the provider quota check did not allow triage}"
+            if [ -n "${QUOTA:-}" ]; then
+              printf 'Provider quota: %s\n' "$QUOTA"
+            fi
+          } > .osv-audit/provider-quota.txt
+          echo "::error::${REASON:-the provider quota check did not allow triage}" >&2
+          exit 1
+
       - name: Install opencode
-        if: ${{ steps.classify.outputs.outcome == 'findings' }}
+        if: ${{ steps.classify.outputs.outcome == 'findings' && vars.OPENCODE_DISABLED != 'true' && steps.preflight.outputs.allowed == 'true' }}
         run: |
           set -euo pipefail
           curl -fsSL https://opencode.ai/install | bash
@@ -155,7 +191,7 @@ jobs:
 
       - name: Triage findings with OpenCode
         id: agent
-        if: ${{ steps.classify.outputs.outcome == 'findings' }}
+        if: ${{ steps.classify.outputs.outcome == 'findings' && vars.OPENCODE_DISABLED != 'true' && steps.preflight.outputs.allowed == 'true' }}
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           # The job's GITHUB_TOKEN carries only `issues: write` on top of
