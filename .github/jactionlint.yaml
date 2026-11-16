@@ -53,3 +53,15 @@ ignores:
       script the pinned anomalyco/opencode/github action and the other audit
       workflows run; there is no checksummed binary to verify against.
     expires: "2027-05-13"
+  # The triage workflow installs the opencode CLI the same way after migrating
+  # off the pinned action (whose unauthenticated version check rate-limits on
+  # runner IPs and failed the first run). The agent's write scope is
+  # `issues: write` only, so whoever controls the opencode release channel
+  # controls the triage step, never the repository's code; the entry expires.
+  - rule: unverified-download
+    file: .github/workflows/opencode-triage.yml
+    reason: >-
+      The opencode installer is the only distribution channel and is the same
+      script the pinned anomalyco/opencode/github action and the other audit
+      workflows run; there is no checksummed binary to verify against.
+    expires: "2027-05-13"
