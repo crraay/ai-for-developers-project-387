@@ -167,8 +167,9 @@ jobs:
              matches are its own comments.
           2. For each finding, note the file, the line and the marker text.
           3. Cross-reference each finding against the existing issues using only
-             these read commands, via bash (keep the --jq filters free of ">"
-             and "<"):
+             these read commands, via bash. The shell whitelist denies |, $,
+             backticks, ;, &, redirects and newlines; run the commands as
+             written, without pipes or --jq filters:
                gh issue list --state open
                gh issue list --search "<text>"
                gh issue view <number>

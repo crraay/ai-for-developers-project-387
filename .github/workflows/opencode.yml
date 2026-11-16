@@ -242,30 +242,7 @@ jobs:
       - name: Exchange App token for the agent
         id: app-token
         continue-on-error: true
-        run: |
-          set -euo pipefail
-          oidc_url="${ACTIONS_ID_TOKEN_REQUEST_URL:-}"
-          oidc_request_token="${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}"
-          if [ -z "$oidc_url" ] || [ -z "$oidc_request_token" ]; then
-            echo "::error::OIDC is not available; id-token: write is required."
-            exit 1
-          fi
-          oidc=$(curl -fsS \
-            -H "Authorization: bearer $oidc_request_token" \
-            "$oidc_url&audience=opencode-github-action" | jq -r .value)
-          if [ -z "$oidc" ] || [ "$oidc" = null ]; then
-            echo "::error::OIDC token request failed."
-            exit 1
-          fi
-          app=$(curl -fsS -X POST \
-            -H "Authorization: Bearer $oidc" \
-            https://api.opencode.ai/exchange_github_app_token | jq -r .token)
-          if [ -z "$app" ] || [ "$app" = null ]; then
-            echo "::error::OpenCode App token exchange failed."
-            exit 1
-          fi
-          echo "::add-mask::$app"
-          echo "app-token=$app" >> "$GITHUB_OUTPUT"
+        run: bash scripts/exchange-app-token.sh
 
       - name: Run OpenCode
         id: agent
@@ -338,9 +315,15 @@ jobs:
       # comment in place rather than losing the answer. Run only after the
       # agent succeeded, or a lone auto-review comment could be mistaken for
       # the answer when the run posted none.
-      - name: Answer in the review thread
+      - name: Exchange a fresh App token for the thread reply
+        id: reply-token
         if: ${{ !cancelled() && steps.agent.outcome == 'success' && github.event_name == 'pull_request_review_comment' }}
+        run: bash scripts/exchange-app-token.sh
+
+      - name: Answer in the review thread
+        if: ${{ !cancelled() && steps.agent.outcome == 'success' && steps.reply-token.outcome == 'success' && github.event_name == 'pull_request_review_comment' }}
         env:
+          GH_TOKEN: ${{ steps.reply-token.outputs.app-token }}
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
           COMMENT_ID: ${{ github.event.comment.id }}
@@ -354,29 +337,6 @@ jobs:
             exit 0
           fi
           boundary=$(cat "$boundary_file")
-
-          oidc_url="${ACTIONS_ID_TOKEN_REQUEST_URL:-}"
-          oidc_request_token="${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}"
-          if [ -z "$oidc_url" ] || [ -z "$oidc_request_token" ]; then
-            echo "::error::OIDC is not available; id-token: write is required."
-            exit 1
-          fi
-          oidc=$(curl -fsS \
-            -H "Authorization: bearer $oidc_request_token" \
-            "$oidc_url&audience=opencode-github-action" | jq -r .value)
-          if [ -z "$oidc" ] || [ "$oidc" = null ]; then
-            echo "::error::OIDC token request failed."
-            exit 1
-          fi
-          app=$(curl -fsS -X POST \
-            -H "Authorization: Bearer $oidc" \
-            https://api.opencode.ai/exchange_github_app_token | jq -r .token)
-          if [ -z "$app" ] || [ "$app" = null ]; then
-            echo "::error::OpenCode App token exchange failed."
-            exit 1
-          fi
-          echo "::add-mask::$app"
-          export GH_TOKEN="$app"
 
           # Only move when exactly one new bot comment exists. The auto-review
           # posts as the same bot under a separate concurrency group: if one of
@@ -480,9 +440,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
+      contents: read # checkout of the report script
       actions: read # inspect the opencode job's failed step
       issues: write # post the reason on the issue or PR
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
       - name: Classify and post the agent failure
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

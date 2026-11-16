@@ -6,8 +6,10 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   reporter: 'list',
-  // Keep traces and the SHA sidecar in one artifact directory at the repo root.
-  outputDir: '../test-results',
+  // Playwright cleans its output directory at the start of a run; keep the
+  // traces in a subdirectory so verify-head's test-results/head-sha.txt
+  // sidecar survives and is uploaded next to them.
+  outputDir: '../test-results/playwright',
   globalSetup: require.resolve('./global-setup.mjs'),
   globalTeardown: require.resolve('./global-teardown.mjs'),
   use: {

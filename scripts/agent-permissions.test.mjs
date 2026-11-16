@@ -80,31 +80,21 @@ for (const { file, permission } of workflows) {
   });
 }
 
-test('triage cannot rewrite an issue body, title or unrelated labels', () => {
+test('triage edits labels only through the validated script', () => {
   const triage = workflows.find(({ file }) => file === 'opencode-triage.yml');
   assert.ok(triage, 'triage permission block is present');
   const entries = Object.entries(triage.permission.bash);
-  const allowIndex = entries.findIndex(
-    ([key, value]) => value === 'allow' && key === 'gh issue edit * --add-label *',
+  assert.ok(
+    entries.some(
+      ([key, value]) =>
+        value === 'allow' && key === 'node scripts/agent-issue-edit.mjs *',
+    ),
+    'triage allows the validated label script',
   );
-  assert.ok(allowIndex >= 0, 'triage allows only a label edit');
-
-  for (const guard of [
-    '*--body*',
-    '*--title*',
-    '*--remove-label*',
-    '*--milestone*',
-    '*-b *',
-    '*-F *',
-    '*-t *',
-    '*-m *',
-    '*-b=*',
-    '*-F=*',
-    '*-t=*',
-    '*-m=*',
-  ]) {
-    const index = entries.findIndex(([key]) => key === guard);
-    assert.ok(index > allowIndex, `triage: ${guard} must guard gh issue edit`);
-    assert.equal(entries[index][1], 'deny', `triage: ${guard} must deny`);
-  }
+  assert.ok(
+    !entries.some(
+      ([key, value]) => value === 'allow' && key.startsWith('gh issue edit'),
+    ),
+    'triage does not allow raw gh issue edit',
+  );
 });

@@ -123,6 +123,9 @@ repository, which is why the explicit fork gate exists.
   `timeout`, failed setup/transport steps become `infra`, agent-step failures
   become `agent_failed`, and the posted body carries the reason, SHA, run link
   and **Status: needs human**.
+- `scripts/agent-issue-edit.test.mjs`: the triage label command accepts only
+  `--add-label` with known labels, and rejects `-bPWNED`, `-tPWNED`, long body
+  and title flags, unknown labels and missing values.
 
 The end-to-end check on a scratch PR is: exhaust the budget, confirm the model
 step is skipped and the refusal comment has the reason, SHA and run link;

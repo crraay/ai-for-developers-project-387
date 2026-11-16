@@ -19,8 +19,10 @@ export const INFRA_STEPS = new Set([
   'Install the pinned toolchain',
   'Remember the newest PR comment',
   'Exchange App token for the agent',
+  'Exchange a fresh App token for the thread reply',
   'Answer in the review thread',
   'Install opencode',
+  'Exchange App token for the review',
   'Post the review',
 ]);
 

@@ -30,38 +30,21 @@ jobs:
       pull-requests: write
       id-token: write
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
       # GITHUB_TOKEN events do not trigger new workflow runs, so a release
       # branch pushed with it never receives the `check`/`smoke` contexts the
       # dev ruleset requires. The OpenCode App installation token is a normal
       # actor event: the branch push starts ci.yml and hexlet-check, and the
-      # release PR can satisfy the required checks. The exchange is the same
-      # one opencode.yml uses; the token is short-lived and masked.
+      # release PR can satisfy the required checks. The exchange lives in
+      # scripts/exchange-app-token.sh so all three callers stay in sync.
       - name: Exchange App token for release-please
         id: app-token
-        run: |
-          set -euo pipefail
-          oidc_url="${ACTIONS_ID_TOKEN_REQUEST_URL:-}"
-          oidc_request_token="${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}"
-          if [ -z "$oidc_url" ] || [ -z "$oidc_request_token" ]; then
-            echo "::error::OIDC is not available; id-token: write is required."
-            exit 1
-          fi
-          oidc=$(curl -fsS \
-            -H "Authorization: bearer $oidc_request_token" \
-            "$oidc_url&audience=opencode-github-action" | jq -r .value)
-          if [ -z "$oidc" ] || [ "$oidc" = null ]; then
-            echo "::error::OIDC token request failed."
-            exit 1
-          fi
-          app=$(curl -fsS -X POST \
-            -H "Authorization: Bearer $oidc" \
-            https://api.opencode.ai/exchange_github_app_token | jq -r .token)
-          if [ -z "$app" ] || [ "$app" = null ]; then
-            echo "::error::OpenCode App token exchange failed."
-            exit 1
-          fi
-          echo "::add-mask::$app"
-          echo "app-token=$app" >> "$GITHUB_OUTPUT"
+        run: bash scripts/exchange-app-token.sh
 
       # Manifest mode is auto-detected from release-please-config.json +
       # .release-please-manifest.json at the repo root (see ADR 0007).

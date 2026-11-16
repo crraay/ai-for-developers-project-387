@@ -252,13 +252,18 @@ jobs:
           fi
 
       # Post the review through the App token: the job's GITHUB_TOKEN stays
-      # read-only, so exchange a fresh OIDC token for the same App token
-      # opencode.yml uses, then `gh pr comment` the agent's answer. Run only
-      # after the agent succeeded, or a lone failure comment could be mistaken
-      # for the review when the run produced none.
-      - name: Post the review
+      # read-only, so exchange a fresh App token, then `gh pr comment` the
+      # agent's answer. Run only after the agent succeeded, or a lone failure
+      # comment could be mistaken for the review when the run produced none.
+      - name: Exchange App token for the review
+        id: review-token
         if: ${{ !cancelled() && steps.agent.outcome == 'success' }}
+        run: bash scripts/exchange-app-token.sh
+
+      - name: Post the review
+        if: ${{ !cancelled() && steps.agent.outcome == 'success' && steps.review-token.outcome == 'success' }}
         env:
+          GH_TOKEN: ${{ steps.review-token.outputs.app-token }}
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
         run: |
@@ -268,28 +273,6 @@ jobs:
             echo "No review to post."
             exit 0
           fi
-          oidc_url="${ACTIONS_ID_TOKEN_REQUEST_URL:-}"
-          oidc_request_token="${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}"
-          if [ -z "$oidc_url" ] || [ -z "$oidc_request_token" ]; then
-            echo "::error::OIDC is not available; id-token: write is required."
-            exit 1
-          fi
-          oidc=$(curl -fsS \
-            -H "Authorization: bearer $oidc_request_token" \
-            "$oidc_url&audience=opencode-github-action" | jq -r .value)
-          if [ -z "$oidc" ] || [ "$oidc" = null ]; then
-            echo "::error::OIDC token request failed."
-            exit 1
-          fi
-          app=$(curl -fsS -X POST \
-            -H "Authorization: Bearer $oidc" \
-            https://api.opencode.ai/exchange_github_app_token | jq -r .token)
-          if [ -z "$app" ] || [ "$app" = null ]; then
-            echo "::error::OpenCode App token exchange failed."
-            exit 1
-          fi
-          echo "::add-mask::$app"
-          export GH_TOKEN="$app"
           gh pr comment "$PR" --repo "$REPO" --body-file "$tmp/review.md"
           echo "Posted the review."
 
@@ -359,9 +342,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
+      contents: read # checkout of the report script
       actions: read # inspect the review job's failed step
       issues: write # post the reason on the PR
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
       - name: Classify and post the review failure
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

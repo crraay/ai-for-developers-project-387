@@ -141,22 +141,10 @@ jobs:
                 "*": "deny",
                 "gh issue view *": "allow",
                 "gh issue list *": "allow",
-                "gh issue edit * --add-label *": "allow",
+                "node scripts/agent-issue-edit.mjs *": "allow",
                 "gh issue close *": "allow",
                 "*--output*": "deny",
                 "*--no-index*": "deny",
-                "*--body*": "deny",
-                "*--title*": "deny",
-                "*--remove-label*": "deny",
-                "*--milestone*": "deny",
-                "*-b *": "deny",
-                "*-F *": "deny",
-                "*-t *": "deny",
-                "*-m *": "deny",
-                "*-b=*": "deny",
-                "*-F=*": "deny",
-                "*-t=*": "deny",
-                "*-m=*": "deny",
                 "*>*": "deny",
                 "*<*": "deny",
                 "*;*": "deny",
@@ -204,7 +192,10 @@ jobs:
 
           2. Classify. Apply exactly one category label (`bug` or
              `enhancement`) and exactly one state label via
-             `gh issue edit ${{ github.event.issue.number }} --add-label ...`:
+             `node scripts/agent-issue-edit.mjs ${{ github.event.issue.number }} --add-label <labels>`
+             (comma-separate the labels, for example
+             `--add-label bug,needs-triage`). The script rejects any other
+             flag, including body and title flags:
              - Already implemented (redundancy found): `wontfix`. Close the
                issue with `gh issue close ${{ github.event.issue.number }}`
                and explain in your final answer where the behaviour lives.
@@ -227,11 +218,12 @@ jobs:
              need from the reporter.
 
           The workflow captures your final answer and posts it as the issue
-          comment; your `gh` calls apply the labels and close the issue, so do
-          not post a comment yourself. Shell access is limited to `gh issue
-          view`, `gh issue list`, `gh issue edit` and `gh issue close`. Do not
-          edit or write any file, do not create issues or pull requests, and do
-          not use the web. Never return an empty answer.
+          comment; the issue-edit script applies the labels and `gh issue
+          close` closes the issue, so do not post a comment yourself. Shell
+          access is limited to `gh issue view`, `gh issue list`, `gh issue
+          close` and `node scripts/agent-issue-edit.mjs`. Do not edit or write
+          any file, do not create issues or pull requests, and do not use the
+          web. Never return an empty answer.
           PROMPT
           if [ ! -s "$tmp/triage-comment.md" ]; then
             echo "::warning::The agent returned no triage comment."
