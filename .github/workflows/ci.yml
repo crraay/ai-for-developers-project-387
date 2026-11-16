@@ -16,7 +16,9 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # A first run cancels superseded work. A re-run (attempt > 1) must not cancel
+  # a newer run that is already in progress on the same ref.
+  cancel-in-progress: ${{ github.run_attempt == 1 }}
 
 jobs:
   check:

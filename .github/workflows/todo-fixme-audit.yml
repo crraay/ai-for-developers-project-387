@@ -17,9 +17,9 @@ name: todo-fixme-audit
 # stderr, so the report is captured deterministically.
 #
 # Authorization mirrors opencode.yml: the model key (OPENCODE_API_KEY) is read
-# only by the agent step; the job's GITHUB_TOKEN stays read-only and is what the
-# agent uses to search issues. No write-capable token is needed, because the
-# report is an artifact, not a commit or an issue.
+# only by the provider preflight and the agent step; the job's GITHUB_TOKEN
+# stays read-only and is what the agent uses to search issues. No write-capable
+# token is needed, because the report is an artifact, not a commit or an issue.
 
 on:
   schedule:
@@ -35,9 +35,11 @@ permissions: {}
 concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: false
+  queue: max # keep every scheduled or manual audit, not only the last pending one
 
 jobs:
   audit:
+    if: vars.OPENCODE_DISABLED != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -57,8 +59,45 @@ jobs:
       - name: Provide the local config's secret file placeholder
         run: touch .render-api-key
 
+      - name: Record the audit date
+        id: date
+        run: echo "today=$(date -u -d '+7 hours' +%F)" >> "$GITHUB_OUTPUT"
+
+      # Provider quota is account-wide. A skipped audit still records itself:
+      # the denial below writes the artifact the upload step expects.
+      - name: Check provider quota
+        id: preflight
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          QUOTA_PERCENT: ${{ vars.OPENCODE_PROVIDER_QUOTA_PERCENT || 95 }}
+        run: node scripts/opencode-preflight.mjs --provider
+
+      - name: Record the provider refusal
+        if: steps.preflight.outputs.allowed == 'false'
+        env:
+          REASON: ${{ steps.preflight.outputs.reason }}
+          QUOTA: ${{ steps.preflight.outputs.quota }}
+          SHA: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          tmp="${RUNNER_TEMP:-/tmp}"
+          {
+            echo '## TODO/FIXME audit did not run'
+            echo
+            printf '%s\n' "${REASON:-the provider quota check did not allow this audit}"
+            echo
+            echo "- Commit: \`${SHA}\`"
+            echo "- Run: ${RUN_URL}"
+            if [ -n "${QUOTA:-}" ]; then
+              echo "- Provider quota: ${QUOTA}"
+            fi
+          } | tee "$tmp/report.md" >> "$GITHUB_STEP_SUMMARY"
+          echo "::warning::${REASON:-the provider quota check did not allow this audit}"
+
       # Same install path as the pinned action, without its event-driven runner.
       - name: Install opencode
+        if: steps.preflight.outputs.allowed == 'true'
         run: |
           set -euo pipefail
           curl -fsSL https://opencode.ai/install | bash
@@ -66,6 +105,7 @@ jobs:
 
       - name: Audit with OpenCode
         id: agent
+        if: steps.preflight.outputs.allowed == 'true'
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           # Read-only token for the whitelisted `gh` calls. Naming it GH_TOKEN
@@ -155,16 +195,15 @@ jobs:
           if [ ! -s "$tmp/report.md" ]; then
             printf 'No TODO/FIXME markers reported.\n' > "$tmp/report.md"
           fi
-          echo "today=$(date -u -d '+7 hours' +%F)" >> "$GITHUB_OUTPUT"
 
       # The report is an artifact, not a commit or an issue, so no write-capable
-      # token is needed. The fallback above guarantees report.md exists whenever
-      # the agent step succeeded, so a "no findings" run still uploads a report.
+      # token is needed. The denial branch above writes the report when the
+      # provider check stops the run; the agent branch writes it on success.
       - name: Upload the report artifact
-        if: ${{ steps.agent.outcome == 'success' }}
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: todo-fixme-audit-${{ steps.agent.outputs.today }}
+          name: todo-fixme-audit-${{ steps.date.outputs.today }}
           path: ${{ runner.temp }}/report.md
           if-no-files-found: error
           retention-days: 90

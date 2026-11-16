@@ -16,6 +16,7 @@ permissions: {}
 concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: false
+  queue: max # a newer push waits instead of replacing the pending release run
 
 jobs:
   release-please:

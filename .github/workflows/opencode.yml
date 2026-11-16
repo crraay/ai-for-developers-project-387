@@ -6,17 +6,32 @@ name: opencode
 # into a shell command.
 #
 # `issue_comment` and `pull_request_review_comment` are dangerous triggers by
-# design: they run in the context of the default branch with the job's secrets
-# and token, and anyone who can comment can start them. Both carry the comment,
-# so the finding is accepted with one scoped, expiring exception in
+# design: anyone who can comment can start them, and `issue_comment` runs in the
+# base repository with the job's secrets and token. A fork review comment gets
+# no secrets (GitHub withholds them for that event) and the event guard below
+# keeps it out of the key-holding job anyway. Both carry the comment, so the
+# finding is accepted with one scoped, expiring exception in
 # .github/jactionlint.yaml. The mitigations live here: the trigger is gated to
 # a comment from the repository owner, the job's GITHUB_TOKEN cannot write (the
-# boundary step reads with it), and the model key is read only by the agent
-# step. A write-capable token — the OpenCode App token, exchanged over OIDC
-# before the agent runs — is handed to the agent as GH_TOKEN, so it can apply
-# labels, file and close issues, push branches and open pull requests, while
-# the workflow's own token stays read-only. The last step exchanges a fresh
-# OIDC token for the App token because the action revokes its own in `finally`.
+# boundary step reads with it), and the model key is read only by the budget
+# and agent jobs. A write-capable token — the OpenCode App token, exchanged over
+# OIDC before the agent runs — is handed to the agent as GH_TOKEN, so it can
+# apply labels, file and close issues, push branches and open pull requests,
+# while the workflow's own token stays read-only. The last step exchanges a
+# fresh OIDC token for the App token because the action revokes its own in
+# `finally`.
+#
+# Three controls are deliberately separate:
+#   - `gate` is secret-free. It accepts only the repository owner's command on
+#     a same-repository PR, and refuses a fork before any job can read
+#     OPENCODE_API_KEY.
+#   - `budget` checks the provider's own account-wide quota and the per-PR
+#     attempt budget. It holds the model key, but only after the gate passed.
+#   - `refuse` posts the reason, head SHA and run link when either check stops
+#     the run. It has no model key.
+# `concurrency` with `cancel-in-progress: false` only protects the running job:
+# GitHub keeps one pending run by default, so `queue: max` preserves every
+# command instead of replacing the waiting one.
 #
 # A comment on a code line is a message in that line's thread, not in the PR
 # conversation. The pinned action already gives the agent the file, line and
@@ -36,32 +51,135 @@ on:
   pull_request_review_comment:
     types: [created]
 
+# The run name is the budget ledger key. It is stable across re-runs and
+# comments on the same thread; skipped runs are excluded by the budget check.
+run-name: "opencode-command-${{ (github.event_name == 'pull_request_review_comment' || github.event.issue.pull_request) && 'pr' || 'issue' }}-${{ github.event.issue.number || github.event.pull_request.number }}"
+
 # Deny every token permission by default; the job asks for the three it needs.
 permissions: {}
 
-# One agent run per issue or pull request. A second /oc queues behind the
-# first instead of working on the same checkout, and an in-flight run is never
-# cancelled: its branch edits would stay behind while the run is gone.
+# One agent run per issue or pull request. A second /oc queues behind the first
+# instead of working on the same checkout, and an in-flight run is never
+# cancelled: its branch edits would stay behind while the run is gone. `queue:
+# max` keeps up to 100 pending commands; without it GitHub's default queue
+# would replace the second waiting command with the third.
 # `issue.number` is set for issue_comment; review comments carry the PR number.
 concurrency:
   group: opencode-${{ github.event.issue.number || github.event.pull_request.number }}
   cancel-in-progress: false
+  queue: max
 
 jobs:
-  opencode:
+  gate:
     # Bot comments are ignored so the agent cannot answer itself in a loop, and
     # only a comment from the repository owner starts a run. Matching the
     # commenter's login to github.repository_owner is stricter and more exact
     # than author_association: a collaborator's comment no longer runs the
     # agent, so the write-capable App token below only ever runs for the
     # owner's own command. The check happens before checkout, so no secret
-    # reaches a runner for anyone else. The OpenCode action still calls
-    # getCollaboratorPermissionLevel as a second, independent gate.
+    # reaches a runner for anyone else. This job has no model key at all; the
+    # fork check runs before the budget job can read it.
     if: |
+      vars.OPENCODE_DISABLED != 'true' &&
       github.event.comment.user.type == 'User' &&
       github.event.comment.user.login == github.repository_owner &&
+      (github.event_name != 'issue_comment' || !contains(github.event.issue.labels.*.name, 'agent-paused')) &&
+      (github.event_name != 'pull_request_review_comment' || !contains(github.event.pull_request.labels.*.name, 'agent-paused')) &&
       (contains(github.event.comment.body, '/oc') ||
        contains(github.event.comment.body, '/opencode'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read # checkout of the preflight script
+      pull-requests: read # fork and head SHA lookup
+    outputs:
+      allowed: ${{ steps.gate.outputs.allowed }}
+      reason: ${{ steps.gate.outputs.reason }}
+      sha: ${{ steps.gate.outputs.sha }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The gate never runs fork code: a review comment on a fork reads the
+          # default branch. A same-repository review comment reads its own head
+          # so a workflow change can be tested before it reaches the default
+          # branch; that contributor already has write access.
+          ref: ${{ (github.event_name == 'pull_request_review_comment' && github.event.pull_request.head.repo.full_name == github.repository) && github.event.pull_request.head.sha || github.event.repository.default_branch }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      # A fork PR can reach this event through `issue_comment`, which runs in
+      # the base repository with secrets. The gate resolves the PR head before
+      # the budget job exists in the graph, so a fork never reaches a job that
+      # can read OPENCODE_API_KEY.
+      - name: Check the PR is in this repository
+        id: gate
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          IS_PR: ${{ github.event_name == 'pull_request_review_comment' || github.event.issue.pull_request != null }}
+          PR_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
+          DEFAULT_SHA: ${{ github.sha }}
+        run: node scripts/opencode-preflight.mjs --gate
+
+  budget:
+    needs: gate
+    # Defense in depth: the event payload is not modifiable by a fork, so a
+    # review comment on a fork can never reach this job even if the PR-head
+    # workflow file was edited to skip the gate.
+    if: |
+      needs.gate.outputs.allowed == 'true' &&
+      (github.event_name != 'pull_request_review_comment' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read # checkout of the preflight script
+      actions: read # list prior workflow runs for the per-PR budget
+    outputs:
+      allowed: ${{ steps.check.outputs.allowed }}
+      reason: ${{ steps.check.outputs.reason }}
+      used: ${{ steps.check.outputs.used }}
+      limit: ${{ steps.check.outputs.limit }}
+      quota: ${{ steps.check.outputs.quota }}
+      sha: ${{ needs.gate.outputs.sha }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Same rule as the gate. This job holds the model key, so a fork
+          # review comment reads the default branch; only a same-repository
+          # review comment may read its own head.
+          ref: ${{ (github.event_name == 'pull_request_review_comment' && github.event.pull_request.head.repo.full_name == github.repository) && github.event.pull_request.head.sha || github.event.repository.default_branch }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      # Provider quota is account-wide; the run budget is per thread. Both are
+      # checked before the model, and the model key is only read in this job
+      # and the agent job (both behind `gate`).
+      - name: Check provider quota and per-thread attempt budget
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          REPO: ${{ github.repository }}
+          BUDGET_KEY: "opencode-command-${{ (github.event_name == 'pull_request_review_comment' || github.event.issue.pull_request) && 'pr' || 'issue' }}-${{ github.event.issue.number || github.event.pull_request.number }}"
+          BUDGET_WORKFLOW: opencode.yml
+          BUDGET_LIMIT: ${{ vars.OPENCODE_RUN_BUDGET || 10 }}
+          BUDGET_INCLUDE_SKIPPED: "false"
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          HEAD_SHA: ${{ needs.gate.outputs.sha }}
+          QUOTA_PERCENT: ${{ vars.OPENCODE_PROVIDER_QUOTA_PERCENT || 95 }}
+        run: node scripts/opencode-preflight.mjs --both
+
+  opencode:
+    needs: [gate, budget]
+    if: |
+      needs.gate.outputs.allowed == 'true' &&
+      needs.budget.outputs.allowed == 'true' &&
+      (github.event_name != 'pull_request_review_comment' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 45 # mise install + setup + check + model time on implement runs
     permissions:
@@ -281,3 +399,57 @@ jobs:
             --input "$tmp/answer.json" > /dev/null
           gh api --method DELETE "repos/$REPO/issues/comments/$answer_id" > /dev/null
           echo "Moved the answer into the review thread."
+
+  refuse:
+    needs: [gate, budget]
+    if: |
+      always() &&
+      (needs.gate.result == 'failure' ||
+       needs.gate.outputs.allowed == 'false' ||
+       (needs.gate.outputs.allowed == 'true' &&
+        (needs.budget.result == 'failure' ||
+         needs.budget.result == 'skipped' ||
+         needs.budget.outputs.allowed == 'false')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write # post the reason on the issue/PR; this job has no model key
+    steps:
+      - name: Post the refusal
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
+          REASON: ${{ needs.budget.outputs.reason || needs.gate.outputs.reason || 'the preflight check did not allow this run' }}
+          SHA: ${{ needs.budget.outputs.sha || needs.gate.outputs.sha || github.sha }}
+          USED: ${{ needs.budget.outputs.used }}
+          LIMIT: ${{ needs.budget.outputs.limit }}
+          QUOTA: ${{ needs.budget.outputs.quota }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          body="${RUNNER_TEMP:-/tmp}/refusal.md"
+          {
+            echo '**OpenCode did not start.**'
+            echo
+            printf '%s\n' "${REASON}"
+            echo
+            echo "- Commit: \`${SHA}\`"
+            echo "- Run: ${RUN_URL}"
+            if [ -n "${USED:-}" ] && [ -n "${LIMIT:-}" ]; then
+              echo "- Budget: ${USED}/${LIMIT} attempts used"
+            fi
+            if [ -n "${QUOTA:-}" ]; then
+              echo "- Provider quota: ${QUOTA}"
+            fi
+            echo
+            echo 'Do not retry this command; raise the limit or wait for the provider window to reset.'
+          } > "$body"
+          {
+            echo '## OpenCode run stopped'
+            echo
+            cat "$body"
+          } >> "$GITHUB_STEP_SUMMARY"
+          gh issue comment "$NUMBER" --repo "$REPO" --body-file "$body"
+          echo "::error::${REASON}"
+          exit 1

@@ -19,22 +19,34 @@ name: opencode-review
 # The agent is read-only: `edit` is denied so the worktree cannot go dirty, the
 # web is denied, and `bash` is a read-only whitelist. A review posts a new
 # comment on every push (#55).
+#
+# `preflight` is the account-wide provider quota check plus the per-PR review
+# attempt budget. It has no write token and runs only for a same-repository PR,
+# so a fork never reaches it. `refuse` posts the reason, head SHA and run link
+# without the model key. The review job therefore starts only when both checks
+# allow it.
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+
+# The run name is the budget ledger key. It is stable across re-runs and
+# pushes; skipped draft/fork runs are excluded by the budget check.
+run-name: "opencode-review-pr-${{ github.event.pull_request.number }}"
 
 # Deny every token permission by default; the job asks for the reads it needs.
 permissions: {}
 
 # One review per pull request: a push cancels the review of the superseded head.
 # Nothing is left behind by a cancelled run, because the comment is posted at
-# the end, and a review of the old head is worth discarding.
+# the end, and a review of the old head is worth discarding. A re-run re-enters
+# the same group, so `cancel-in-progress` is limited to the first attempt: a
+# re-run must not cancel a newer review that is already running.
 concurrency:
   group: opencode-review-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.run_attempt == 1 }}
 
 jobs:
-  review:
+  preflight:
     # Drafts are skipped until they are ready for review. Forks are skipped:
     # they get a read-only token and no secrets, so the run could not reach the
     # model at all. The author allowlist below is what excludes
@@ -44,8 +56,52 @@ jobs:
       !github.event.pull_request.draft &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       !startsWith(github.event.pull_request.head.ref, 'release-please--') &&
+      vars.OPENCODE_DISABLED != 'true' &&
+      !contains(github.event.pull_request.labels.*.name, 'agent-paused') &&
       (github.event.pull_request.user.login == github.repository_owner ||
        github.event.pull_request.user.login == 'opencode-agent[bot]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read # checkout of the preflight script on the default branch
+      actions: read # list prior workflow runs for the per-PR budget
+    outputs:
+      allowed: ${{ steps.check.outputs.allowed }}
+      reason: ${{ steps.check.outputs.reason }}
+      used: ${{ steps.check.outputs.used }}
+      limit: ${{ steps.check.outputs.limit }}
+      quota: ${{ steps.check.outputs.quota }}
+      sha: ${{ steps.check.outputs.sha }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Only a same-repository PR reaches this job (the `if` above), and a
+          # contributor with a branch here already has write access. Checking
+          # out the head lets a preflight change be reviewed before it reaches
+          # the default branch; forks never run this job.
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Check provider quota and per-PR attempt budget
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          REPO: ${{ github.repository }}
+          BUDGET_KEY: "opencode-review-pr-${{ github.event.pull_request.number }}"
+          BUDGET_WORKFLOW: opencode-review.yml
+          BUDGET_LIMIT: ${{ vars.OPENCODE_REVIEW_BUDGET || 20 }}
+          BUDGET_INCLUDE_SKIPPED: "false"
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          QUOTA_PERCENT: ${{ vars.OPENCODE_PROVIDER_QUOTA_PERCENT || 95 }}
+        run: node scripts/opencode-preflight.mjs --both
+
+  review:
+    needs: preflight
+    if: needs.preflight.outputs.allowed == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -221,3 +277,53 @@ jobs:
           export GH_TOKEN="$app"
           gh pr comment "$PR" --repo "$REPO" --body-file "$tmp/review.md"
           echo "Posted the review."
+
+  refuse:
+    needs: preflight
+    if: |
+      always() &&
+      (needs.preflight.result == 'failure' ||
+       needs.preflight.outputs.allowed == 'false')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write # post the reason on the PR; this job has no model key
+    steps:
+      - name: Post the refusal
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          REASON: ${{ needs.preflight.outputs.reason || 'the preflight check did not allow this review' }}
+          SHA: ${{ needs.preflight.outputs.sha || github.event.pull_request.head.sha }}
+          USED: ${{ needs.preflight.outputs.used }}
+          LIMIT: ${{ needs.preflight.outputs.limit }}
+          QUOTA: ${{ needs.preflight.outputs.quota }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          body="${RUNNER_TEMP:-/tmp}/refusal.md"
+          {
+            echo '**OpenCode review did not start.**'
+            echo
+            printf '%s\n' "${REASON}"
+            echo
+            echo "- Commit: \`${SHA}\`"
+            echo "- Run: ${RUN_URL}"
+            if [ -n "${USED:-}" ] && [ -n "${LIMIT:-}" ]; then
+              echo "- Budget: ${USED}/${LIMIT} attempts used"
+            fi
+            if [ -n "${QUOTA:-}" ]; then
+              echo "- Provider quota: ${QUOTA}"
+            fi
+            echo
+            echo 'Do not retry this review; raise the limit or wait for the provider window to reset.'
+          } > "$body"
+          {
+            echo '## OpenCode review stopped'
+            echo
+            cat "$body"
+          } >> "$GITHUB_STEP_SUMMARY"
+          gh issue comment "$PR" --repo "$REPO" --body-file "$body"
+          echo "::error::${REASON}"
+          exit 1
