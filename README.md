@@ -234,11 +234,18 @@ lives in the `OPENCODE_API_KEY` repository secret. The run posts the agent's
 answer as a comment (and, for a line comment, moves it into that line's thread).
 A companion workflow,
 [`.github/workflows/opencode-review.yml`](.github/workflows/opencode-review.yml),
-reviews each non-draft PR authored by the owner or the agent bot.
+reviews each non-draft PR authored by the owner or the agent bot. A third,
+[`.github/workflows/opencode-triage.yml`](.github/workflows/opencode-triage.yml),
+triages each newly opened issue: it runs on `issues: [opened]`, skips bot
+authors and any issue already carrying a triage state label, and asks the agent
+to follow the triage skill (`.agents/skills/triage/`) — applying a
+`bug`/`enhancement` category plus a state label and posting a triage comment.
+Tickets produced by `/to-tickets` and `/to-spec` already carry `ready-for-agent`
+and so pass through untouched.
 
-Agent sessions are **not shared**: both workflows set `share: "false"` so a run's
-transcript is never published (the action would otherwise share it by default on
-a public repo). The skills and GitHub Issues conventions the agent follows live
+Agent sessions are **not shared**: all three workflows set `share: "false"` so a
+run's transcript is never published (the action would otherwise share it by
+default on a public repo). The skills and GitHub Issues conventions the agent follows live
 in `.agents/skills/` and `docs/agents/`; the repo-specific commands it may run
 are documented in [AGENTS.md](AGENTS.md).
 
