@@ -123,10 +123,10 @@ repository, which is why the explicit fork gate exists.
 - `scripts/agent-permissions.test.mjs`: every `OPENCODE_PERMISSION` block is
   valid JSON, is deny-by-default, carries the metacharacter guards after the
   allow rules, and the triage workflow cannot rewrite an issue body or title.
-- `scripts/agent-failure-report.test.mjs`: cancelled and timed-out jobs become
-  `timeout`, failed setup/transport steps become `infra`, agent-step failures
-  become `agent_failed`, and the posted body carries the reason, SHA, run link
-  and **Status: needs human**.
+- `scripts/agent-failure-report.test.mjs`: a cancelled job is not reported; a
+  timed-out job becomes `timeout`; failed setup/transport steps become `infra`;
+  agent-step failures become `agent_failed`; and the posted body carries the
+  reason, SHA, run link and **Status: needs human**.
 - `scripts/agent-issue-edit.test.mjs`: the triage write accepts only the event
   issue, `--add-label` with the non-promotion triage vocabulary and `--close`;
   it rejects `-bPWNED`, `-tPWNED`, long body and title flags, promotion labels,
