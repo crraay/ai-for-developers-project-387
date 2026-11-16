@@ -38,6 +38,10 @@ const nonNegativeInteger = (value) => {
   return Number.isInteger(number) && number >= 0 ? number : 0;
 };
 
+// One reason code, not a comma-joined list: gate -> provider -> budget order.
+// The full reason text still carries every failed check.
+export const firstCode = (...codes) => codes.find(Boolean) ?? '';
+
 /**
  * Sum the attempts of earlier matching runs.
  *
@@ -313,7 +317,7 @@ const main = async () => {
   if (mode === 'gate' || mode === 'both') {
     const gate = runGate(env);
     result.allowed = gate.allowed;
-    result.code = [result.code, gate.code].filter(Boolean).join(',');
+    result.code = firstCode(result.code, gate.code);
     result.reason = gate.reason;
     result.sha = gate.sha;
   }
@@ -322,7 +326,7 @@ const main = async () => {
     const provider = await runProvider(env);
     if (!provider.allowed) {
       result.allowed = false;
-      result.code = [result.code, provider.code].filter(Boolean).join(',');
+      result.code = firstCode(result.code, provider.code);
       result.reason = [result.reason, provider.reason].filter(Boolean).join('; ');
     }
     result.quota = provider.quota;
@@ -332,7 +336,7 @@ const main = async () => {
     const budget = runBudget(env);
     if (!budget.allowed) {
       result.allowed = false;
-      result.code = [result.code, budget.code].filter(Boolean).join(',');
+      result.code = firstCode(result.code, budget.code);
       result.reason = [result.reason, budget.reason].filter(Boolean).join('; ');
     }
     result.used = budget.used;

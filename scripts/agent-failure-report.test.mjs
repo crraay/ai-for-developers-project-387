@@ -8,7 +8,7 @@ import {
   renderFailureBody,
 } from './agent-failure-report.mjs';
 
-test('a cancelled job is a timeout', () => {
+test('a cancelled job is not reported as a timeout', () => {
   assert.equal(
     classifyFailure({
       result: 'cancelled',
@@ -16,7 +16,7 @@ test('a cancelled job is a timeout', () => {
       failedStep: 'Run OpenCode',
       timeoutMinutes: 45,
     }),
-    'timeout',
+    null,
   );
 });
 

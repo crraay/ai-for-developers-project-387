@@ -32,8 +32,10 @@ export const classifyFailure = ({
   failedStep,
   timeoutMinutes,
 }) => {
-  if (result !== 'failure' && result !== 'cancelled') return null;
-  if (result === 'cancelled') return 'timeout';
+  // A cancelled job is a superseded or manually cancelled run, not a timeout:
+  // opencode-review cancels the old review on every push. A real job timeout
+  // ends as `failure` and is caught by the duration check below.
+  if (result !== 'failure') return null;
   if (
     Number.isFinite(durationSeconds) &&
     durationSeconds >= Number(timeoutMinutes) * 60 - 60

@@ -61,12 +61,16 @@ artifact and summary. The PR-facing message contains:
 - **Status: needs human** and the instruction not to retry automatically.
 
 The same text is written to the job summary. The refusal job has no model key.
-A separate `report` job handles a run that passed preflight and then failed or
-was cancelled: it reads the failed step from the Actions job API and posts
-`timeout` (cancelled/timed out), `infra` (setup or transport step) or
-`agent_failed` (the agent step) with the last SHA and the log link. It has no
-model key either. If the reason is unclear, inspect the linked log; the code is
-a routing hint, not a diagnosis.
+When more than one check refuses, the code is the first in gate → provider →
+budget order; the reason text still lists every failed check.
+A separate `report` job handles a run that passed preflight and then failed:
+it reads the failed step from the Actions job API and posts `timeout` (the job
+ended as a failure at its time limit), `infra` (setup or transport step) or
+`agent_failed` (the agent step) with the last SHA and the log link. A cancelled
+run — a superseded review or a manual cancellation — is not reported as a
+failure; it was deliberately discarded. The report job has no model key. If the
+reason is unclear, inspect the linked log; the code is a routing hint, not a
+diagnosis.
 
 ## Provider quota
 

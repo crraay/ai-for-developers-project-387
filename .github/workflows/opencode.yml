@@ -428,15 +428,16 @@ jobs:
   report:
     # The preflight checks passed, so the model was allowed to run; the failure
     # happened after that. This job has no model key and gives the stopped run a
-    # reason code, the last SHA and the log link. A timeout or cancellation is
-    # reported as `timeout`; a failed setup step is `infra`; everything else is
-    # `agent_failed` for a human to inspect.
+    # reason code, the last SHA and the log link. A timed-out job ends as
+    # `failure` and is `timeout`; a failed setup step is `infra`; everything
+    # else is `agent_failed` for a human to inspect. A cancelled job is a
+    # deliberate cancellation and is not reported as a failure.
     needs: [gate, budget, opencode]
     if: |
       always() &&
       needs.gate.outputs.allowed == 'true' &&
       needs.budget.outputs.allowed == 'true' &&
-      (needs.opencode.result == 'failure' || needs.opencode.result == 'cancelled')
+      needs.opencode.result == 'failure'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

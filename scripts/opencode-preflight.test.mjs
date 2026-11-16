@@ -8,6 +8,7 @@ import {
   evaluateGate,
   evaluateProvider,
   fetchProviderUsage,
+  firstCode,
   parseUsage,
   selectPriorAttempts,
 } from './opencode-preflight.mjs';
@@ -40,6 +41,12 @@ test('refusals carry a reason code for the finalizer', () => {
   const misconfigured = evaluateBudget({ priorAttempts: 0, currentAttempt: 1, limit: 0 });
   assert.equal(misconfigured.code, 'infra');
   assert.equal(evaluateBudget({ priorAttempts: 0, currentAttempt: 1, limit: 10 }).code, '');
+});
+
+test('multiple refusals keep one documented reason code', () => {
+  assert.equal(firstCode('', 'provider_quota', 'limit_exhausted'), 'provider_quota');
+  assert.equal(firstCode('limit_exhausted', 'provider_quota'), 'limit_exhausted');
+  assert.equal(firstCode('', '', ''), '');
 });
 
 test('a re-run consumes another attempt', () => {

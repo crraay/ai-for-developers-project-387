@@ -331,14 +331,15 @@ jobs:
 
   report:
     # The preflight passed and the review was allowed to call the model. A
-    # failure after that is classified without a model key: a timeout or
-    # cancellation is `timeout`, a setup/transport step is `infra`, and an
-    # agent-step failure is `agent_failed`.
+    # failure after that is classified without a model key: a timed-out job is
+    # `timeout`, a setup/transport step is `infra`, and an agent-step failure is
+    # `agent_failed`. A cancelled review is the superseded-review path from
+    # concurrency, not a failure, so it does not report.
     needs: [preflight, review]
     if: |
       always() &&
       needs.preflight.outputs.allowed == 'true' &&
-      (needs.review.result == 'failure' || needs.review.result == 'cancelled')
+      needs.review.result == 'failure'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
