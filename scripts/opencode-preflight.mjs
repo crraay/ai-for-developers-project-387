@@ -38,6 +38,10 @@ const nonNegativeInteger = (value) => {
   return Number.isInteger(number) && number >= 0 ? number : 0;
 };
 
+// One reason code, not a comma-joined list: gate -> provider -> budget order.
+// The full reason text still carries every failed check.
+export const firstCode = (...codes) => codes.find(Boolean) ?? '';
+
 /**
  * Sum the attempts of earlier matching runs.
  *
@@ -65,12 +69,14 @@ export function selectPriorAttempts(
 export function evaluateBudget({ priorAttempts, currentAttempt, limit }) {
   const used = nonNegativeInteger(priorAttempts) + positiveInteger(currentAttempt, 1);
   const safeLimit = positiveInteger(limit, 0);
+  const allowed = safeLimit > 0 && used <= safeLimit;
   return {
-    allowed: safeLimit > 0 && used <= safeLimit,
+    allowed,
     used,
     limit: safeLimit,
+    code: allowed ? '' : safeLimit === 0 ? 'infra' : 'limit_exhausted',
     reason:
-      safeLimit > 0 && used <= safeLimit
+      allowed
         ? ''
         : safeLimit === 0
           ? 'per-PR run budget is not configured with a positive limit'
@@ -112,12 +118,17 @@ export function formatUsage(windows) {
 export function evaluateProvider(windows, threshold = DEFAULT_QUOTA_PERCENT) {
   const safeThreshold = Math.min(100, Math.max(1, positiveInteger(threshold, DEFAULT_QUOTA_PERCENT)));
   if (!Array.isArray(windows) || windows.length === 0) {
-    return { allowed: false, reason: 'provider quota check returned no usage windows' };
+    return {
+      allowed: false,
+      code: 'provider_quota',
+      reason: 'provider quota check returned no usage windows',
+    };
   }
   const limited = windows.filter((window) => window.status === 'rate-limited');
   if (limited.length > 0) {
     return {
       allowed: false,
+      code: 'provider_quota',
       reason: `provider quota exhausted: ${formatUsage(windows)}`,
     };
   }
@@ -125,16 +136,18 @@ export function evaluateProvider(windows, threshold = DEFAULT_QUOTA_PERCENT) {
   if (over.length > 0) {
     return {
       allowed: false,
+      code: 'provider_quota',
       reason: `provider quota near its limit (threshold ${safeThreshold}%): ${formatUsage(windows)}`,
     };
   }
-  return { allowed: true, reason: '' };
+  return { allowed: true, code: '', reason: '' };
 }
 
 export function evaluateGate({ headRepo, repo, sha }) {
   if (!headRepo) {
     return {
       allowed: false,
+      code: 'infra',
       reason: 'pull request head repository is unavailable (deleted fork?)',
       sha: sha ?? '',
     };
@@ -142,11 +155,12 @@ export function evaluateGate({ headRepo, repo, sha }) {
   if (headRepo !== repo) {
     return {
       allowed: false,
+      code: 'fork',
       reason: `/oc is disabled on fork pull requests (head ${headRepo}); push the branch to ${repo}`,
       sha: sha ?? '',
     };
   }
-  return { allowed: true, reason: '', sha: sha ?? '' };
+  return { allowed: true, code: '', reason: '', sha: sha ?? '' };
 }
 
 const ghJson = (args, env) => {
@@ -186,7 +200,7 @@ export const fetchProviderUsage = async (apiKey, url, timeoutMs = 10_000) => {
 
 const runGate = (env) => {
   if (env.IS_PR !== 'true') {
-    return { allowed: true, reason: '', sha: env.DEFAULT_SHA ?? '' };
+    return { allowed: true, code: '', reason: '', sha: env.DEFAULT_SHA ?? '' };
   }
   const pullRequest = ghJson(
     [`repos/${env.REPO}/pulls/${env.PR_NUMBER}`],
@@ -201,18 +215,24 @@ const runGate = (env) => {
 
 const runProvider = async (env) => {
   if (!env.OPENCODE_API_KEY) {
-    return { allowed: false, reason: 'OPENCODE_API_KEY is not set', quota: '' };
+    return {
+      allowed: false,
+      code: 'infra',
+      reason: 'OPENCODE_API_KEY is not set',
+      quota: '',
+    };
   }
   const result = await fetchProviderUsage(
     env.OPENCODE_API_KEY,
     env.USAGE_URL || DEFAULT_USAGE_URL,
   );
   if (!result.ok) {
-    return { allowed: false, reason: result.reason, quota: '' };
+    return { allowed: false, code: 'infra', reason: result.reason, quota: '' };
   }
   const evaluation = evaluateProvider(result.windows, env.QUOTA_PERCENT);
   return {
     allowed: evaluation.allowed,
+    code: evaluation.code,
     reason: evaluation.reason,
     quota: formatUsage(result.windows),
   };
@@ -223,7 +243,13 @@ const runBudget = (env) => {
   const currentRunId = Number(env.GITHUB_RUN_ID);
   const currentAttempt = positiveInteger(env.GITHUB_RUN_ATTEMPT, 1);
   if (!env.BUDGET_KEY || !Number.isInteger(currentRunId) || currentRunId <= 0) {
-    return { allowed: false, reason: 'run budget is missing its key or run id', used: '', limit };
+    return {
+      allowed: false,
+      code: 'infra',
+      reason: 'run budget is missing its key or run id',
+      used: '',
+      limit,
+    };
   }
   const pages = ghJson(
     [
@@ -244,6 +270,7 @@ const runBudget = (env) => {
   const evaluation = evaluateBudget({ priorAttempts: prior, currentAttempt, limit });
   return {
     allowed: evaluation.allowed,
+    code: evaluation.code,
     reason: evaluation.reason,
     used: evaluation.used,
     limit: evaluation.limit,
@@ -253,6 +280,7 @@ const runBudget = (env) => {
 const writeOutputs = (result) => {
   const values = {
     allowed: String(result.allowed === true),
+    code: String(result.code ?? '').replaceAll('\n', ' '),
     reason: String(result.reason ?? '').replaceAll('\n', ' '),
     sha: String(result.sha ?? '').replaceAll('\n', ' '),
     used: String(result.used ?? ''),
@@ -284,11 +312,12 @@ const main = async () => {
         ? 'budget'
         : 'both';
   const env = process.env;
-  const result = { allowed: true, reason: '', sha: env.HEAD_SHA ?? '' };
+  const result = { allowed: true, code: '', reason: '', sha: env.HEAD_SHA ?? '' };
 
   if (mode === 'gate' || mode === 'both') {
     const gate = runGate(env);
     result.allowed = gate.allowed;
+    result.code = firstCode(result.code, gate.code);
     result.reason = gate.reason;
     result.sha = gate.sha;
   }
@@ -297,6 +326,7 @@ const main = async () => {
     const provider = await runProvider(env);
     if (!provider.allowed) {
       result.allowed = false;
+      result.code = firstCode(result.code, provider.code);
       result.reason = [result.reason, provider.reason].filter(Boolean).join('; ');
     }
     result.quota = provider.quota;
@@ -306,6 +336,7 @@ const main = async () => {
     const budget = runBudget(env);
     if (!budget.allowed) {
       result.allowed = false;
+      result.code = firstCode(result.code, budget.code);
       result.reason = [result.reason, budget.reason].filter(Boolean).join('; ');
     }
     result.used = budget.used;
@@ -322,6 +353,7 @@ if (isMain) {
   main().catch((error) => {
     writeOutputs({
       allowed: false,
+      code: 'infra',
       reason: `preflight failed: ${error instanceof Error ? error.message : String(error)}`,
     });
   });

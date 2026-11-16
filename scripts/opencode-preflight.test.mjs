@@ -8,6 +8,7 @@ import {
   evaluateGate,
   evaluateProvider,
   fetchProviderUsage,
+  firstCode,
   parseUsage,
   selectPriorAttempts,
 } from './opencode-preflight.mjs';
@@ -23,7 +24,7 @@ const run = (overrides) => ({
 test('a first attempt uses one slot and is allowed below the limit', () => {
   assert.deepEqual(
     evaluateBudget({ priorAttempts: 0, currentAttempt: 1, limit: 10 }),
-    { allowed: true, used: 1, limit: 10, reason: '' },
+    { allowed: true, used: 1, limit: 10, code: '', reason: '' },
   );
 });
 
@@ -32,6 +33,20 @@ test('the tenth attempt fits and the eleventh is refused', () => {
   const refused = evaluateBudget({ priorAttempts: 10, currentAttempt: 1, limit: 10 });
   assert.equal(refused.allowed, false);
   assert.match(refused.reason, /11 of 10 attempts used/);
+});
+
+test('refusals carry a reason code for the finalizer', () => {
+  const exhausted = evaluateBudget({ priorAttempts: 10, currentAttempt: 1, limit: 10 });
+  assert.equal(exhausted.code, 'limit_exhausted');
+  const misconfigured = evaluateBudget({ priorAttempts: 0, currentAttempt: 1, limit: 0 });
+  assert.equal(misconfigured.code, 'infra');
+  assert.equal(evaluateBudget({ priorAttempts: 0, currentAttempt: 1, limit: 10 }).code, '');
+});
+
+test('multiple refusals keep one documented reason code', () => {
+  assert.equal(firstCode('', 'provider_quota', 'limit_exhausted'), 'provider_quota');
+  assert.equal(firstCode('limit_exhausted', 'provider_quota'), 'limit_exhausted');
+  assert.equal(firstCode('', '', ''), '');
 });
 
 test('a re-run consumes another attempt', () => {
@@ -131,6 +146,7 @@ test('provider quota refuses a rate-limited window', () => {
   });
   const result = evaluateProvider(windows, 95);
   assert.equal(result.allowed, false);
+  assert.equal(result.code, 'provider_quota');
   assert.match(result.reason, /provider quota exhausted/);
   assert.match(result.reason, /5h 100% \(rate-limited\)/);
 });
@@ -161,13 +177,16 @@ test('provider quota allows windows below the threshold', () => {
 test('gate allows only a same-repository pull request and carries its head SHA', () => {
   assert.deepEqual(
     evaluateGate({ headRepo: 'crraay/repo', repo: 'crraay/repo', sha: 'abc123' }),
-    { allowed: true, reason: '', sha: 'abc123' },
+    { allowed: true, code: '', reason: '', sha: 'abc123' },
   );
   const fork = evaluateGate({ headRepo: 'someone/repo', repo: 'crraay/repo', sha: 'def456' });
   assert.equal(fork.allowed, false);
+  assert.equal(fork.code, 'fork');
   assert.match(fork.reason, /fork pull requests/);
   assert.equal(fork.sha, 'def456');
-  assert.equal(evaluateGate({ headRepo: null, repo: 'crraay/repo', sha: '' }).allowed, false);
+  const missing = evaluateGate({ headRepo: null, repo: 'crraay/repo', sha: '' });
+  assert.equal(missing.allowed, false);
+  assert.equal(missing.code, 'infra');
 });
 
 const withServer = async (handler, run) => {

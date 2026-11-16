@@ -53,12 +53,24 @@ not run. The `/oc` and review workflows use a separate `refuse` job; triage
 posts the same message on the issue, and the scheduled audits write it to their
 artifact and summary. The PR-facing message contains:
 
-- the reason (budget, provider quota, fork, or preflight failure),
+- the reason code (`limit_exhausted`, `provider_quota`, `fork`, `infra`, `timeout` or `agent_failed`),
+- the reason text,
 - the PR head SHA,
 - the workflow run link,
-- the used/limit attempts and the provider window percentages.
+- the used/limit attempts and the provider window percentages,
+- **Status: needs human** and the instruction not to retry automatically.
 
 The same text is written to the job summary. The refusal job has no model key.
+When more than one check refuses, the code is the first in gate → provider →
+budget order; the reason text still lists every failed check.
+A separate `report` job handles a run that passed preflight and then failed:
+it reads the failed step from the Actions job API and posts `timeout` (the job
+ended as a failure at its time limit), `infra` (setup or transport step) or
+`agent_failed` (the agent step) with the last SHA and the log link. A cancelled
+run — a superseded review or a manual cancellation — is not reported as a
+failure; it was deliberately discarded. The report job has no model key. If the
+reason is unclear, inspect the linked log; the code is a routing hint, not a
+diagnosis.
 
 ## Provider quota
 
@@ -101,14 +113,24 @@ repository, which is why the explicit fork gate exists.
 
 ## Tests
 
-`node --test scripts/opencode-preflight.test.mjs` (also part of
-`mise run check`) covers:
+`mise run check:workflows` (also part of `mise run check`) runs:
 
-- first attempt, the last allowed attempt, and the refused attempt,
-- a re-run consuming another attempt,
-- cancelled attempts counted and skipped attempts ignored,
-- provider `ok`, `rate-limited`, threshold and unknown-status payloads,
-- the fork/same-repository gate.
+- `scripts/opencode-preflight.test.mjs`: first attempt, the last allowed
+  attempt, and the refused attempt; a re-run consuming another attempt;
+  cancelled attempts counted and skipped attempts ignored; provider `ok`,
+  `rate-limited`, threshold and unknown-status payloads; the
+  fork/same-repository gate; and the `limit_exhausted` / `infra` reason codes.
+- `scripts/agent-permissions.test.mjs`: every `OPENCODE_PERMISSION` block is
+  valid JSON, is deny-by-default, carries the metacharacter guards after the
+  allow rules, and the triage workflow cannot rewrite an issue body or title.
+- `scripts/agent-failure-report.test.mjs`: a cancelled job is not reported; a
+  timed-out job becomes `timeout`; failed setup/transport steps become `infra`;
+  agent-step failures become `agent_failed`; and the posted body carries the
+  reason, SHA, run link and **Status: needs human**.
+- `scripts/agent-issue-edit.test.mjs`: the triage write accepts only the event
+  issue, `--add-label` with the non-promotion triage vocabulary and `--close`;
+  it rejects `-bPWNED`, `-tPWNED`, long body and title flags, promotion labels,
+  unknown labels, missing values and a different issue number.
 
 The end-to-end check on a scratch PR is: exhaust the budget, confirm the model
 step is skipped and the refusal comment has the reason, SHA and run link;

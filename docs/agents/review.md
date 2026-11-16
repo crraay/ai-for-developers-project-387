@@ -21,7 +21,8 @@ the `code-review` skill; when the skill and this file disagree, this file wins.
 
 1. `AGENTS.md` — how this repo works (gates, generated files, commits, tickets).
 2. `CODING_STANDARDS.md` — how code here is written.
-3. `.agents/skills/code-review/SKILL.md` — the method: two axes, plus the
+3. `REVIEW.md` — the calendar/booking criteria this project must not regress.
+4. `.agents/skills/code-review/SKILL.md` — the method: two axes, plus the
    Fowler smell baseline for the Standards axis. The skill runs its axes as
    parallel sub-agents; this run has one context and no `task` tool, so work
    both axes in sequence and keep their headings separate.
@@ -36,16 +37,19 @@ the `code-review` skill; when the skill and this file disagree, this file wins.
   to them are part of the input.
 - The tickets the description links (`Closes #n`, `Refs #n`, `Part of #n`):
   `gh issue view <n>`. Read the acceptance criteria, not just the title.
+- The human approval: the issue/PR comment or linked document the description
+  names. Read its comments too (`gh issue view <n> --comments`). If no approval
+  is linked, say so and treat the change as unapproved.
 - CI: `gh pr checks <n>`, and `gh run view <id>` when a check failed.
 
 Shell access is a read-only whitelist: `git status|log|show|merge-base|rev-parse`
 and `gh pr view|diff|checks`, `gh issue view`, `gh run view`. Nothing else runs;
 `edit`, `question`, `webfetch`, `websearch` and `task` are denied, and so is
 reading a `.env` file — the base policy would prompt for those, and a prompt
-blocks the run. Redirects are denied as well, so a command that needs `>`, `<`
-or `|` will not run; keep `--jq` filters free of `>` and `<`, which the guard
-cannot tell from a redirect. There is no comment or approval tool — report, do
-not act.
+blocks the run. Redirects, pipes, command substitution, backticks, `;`, `&`
+and literal newlines are denied as well, so an agent command is one simple
+command; do not write a `--jq` filter that needs `|`, `>`, `<` or `$`. There is
+no comment or approval tool — report, do not act.
 
 ## Axes
 

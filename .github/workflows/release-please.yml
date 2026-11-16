@@ -22,11 +22,32 @@ jobs:
   release-please:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # Minimum the action needs: tags/releases (contents) and the release PR.
+    # Minimum the action needs: tags/releases (contents) and the release PR,
+    # plus OIDC for the App token that makes the release branch push visible to
+    # the other workflows (GITHUB_TOKEN-created events do not start them).
     permissions:
       contents: write
       pull-requests: write
+      id-token: write
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      # GITHUB_TOKEN events do not trigger new workflow runs, so a release
+      # branch pushed with it never receives the `check`/`smoke` contexts the
+      # dev ruleset requires. The OpenCode App installation token is a normal
+      # actor event: the branch push starts ci.yml and hexlet-check, and the
+      # release PR can satisfy the required checks. The exchange lives in
+      # scripts/exchange-app-token.sh so all three callers stay in sync.
+      - name: Exchange App token for release-please
+        id: app-token
+        run: bash scripts/exchange-app-token.sh
+
       # Manifest mode is auto-detected from release-please-config.json +
       # .release-please-manifest.json at the repo root (see ADR 0007).
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          token: ${{ steps.app-token.outputs.app-token }}

@@ -8,6 +8,8 @@ Commit messages follow [Conventional Commits](https://www.conventionalcommits.or
 
 Commits and PRs reference their ticket. `Refs #<n>` in the commit body points at the issue the change works on; `Closes #<n>` in the PR description closes it once the acceptance criteria are met; `Part of #<map>` covers work bundled under a decision map (see `docs/agents/issue-tracker.md`). An implementation commit without a referenceable issue is an exception — raise it with a human before merging.
 
+PR bodies follow `.github/pull_request_template.md`: link the source issue, spec, tickets and the human approval, and record the check commands, run links and the verified SHA. If a human approval link does not exist, say so instead of implying one.
+
 Run at most one build command at a time per directory (`gradlew`, `npm`, `docker compose`) — a second concurrent build corrupts shared build/test state.
 
 Agent shells on this machine: `mise` is not on PATH — full path: `C:\Program Files\mise\bin\mise.exe` (it has moved before: if that path is empty, re-find `mise.exe` under `C:\Program Files` and update this line). Prepend `C:\Program Files\mise\bin` to `$env:PATH` before `git commit`/`git push` (hk hooks exec `mise x`) and before running tasks that nest `mise run`. Prefer the `mise run` tasks for builds: bare `gradlew` resolves to this machine's system Java 17 (the build needs 25) and `mise x -- gradlew` fails with "cannot find binary path"; if you must invoke gradlew directly, set `$env:JAVA_HOME = (mise where java)` first.
@@ -28,13 +30,13 @@ Lint rules are never disabled to get a change through. Exceptions are narrow (on
 
 ### Pull request review
 
-Every non-draft PR authored by the repository owner or `opencode-agent[bot]` is reviewed automatically by `opencode-review.yml` (release-please, dependabot and fork PRs are skipped): the agent reads the diff, the linked ticket and CI, then posts one comment. The contract it follows is `docs/agents/review.md`. The review is advisory — it is not a required check, a failed run does not fail the PR, and nothing it says is an approval. Unlike an `/oc` run, this one gets a read-only `GH_TOKEN` (so `gh pr view|diff|checks` work) and a read-only shell whitelist: it cannot edit, commit or approve anything. A new comment is posted on every push (#55).
+Every non-draft PR authored by the repository owner or `opencode-agent[bot]` is reviewed automatically by `opencode-review.yml` (release-please, dependabot and fork PRs are skipped): the agent reads the diff, the linked ticket, the human approval and CI, then posts one comment. The contract it follows is `REVIEW.md` plus `docs/agents/review.md`. The review is advisory — it is not a required check, a failed run does not fail the PR, and nothing it says is an approval. Unlike an `/oc` run, this one gets a read-only `GH_TOKEN` (so `gh pr view|diff|checks` work) and a read-only shell whitelist: it cannot edit, commit or approve anything. A new comment is posted on every push (#55).
 
 ### Asking the agent in a comment
 
 An `/oc` or `/opencode` mention starts the agent on an issue, a pull request, or a line of a pull request's diff. A comment on a line gets the file, line and diff hunk; the answer is moved from the action's top-level comment into that review thread, so the discussion stays under the line. See `.github/workflows/opencode.yml` and #61.
 
-Inside an `/oc` run the agent has a write-capable `GH_TOKEN` (the OpenCode App token exchanged by the workflow), so `gh`/`git` can apply labels, create issues, push branches and open pull requests. Shell access is limited to `git`, `gh` and `mise run *`; the web, subagents and arbitrary commands are denied. Two conventions keep the loop clean:
+Inside an `/oc` run the agent has a write-capable `GH_TOKEN` (the OpenCode App token exchanged by the workflow), so `gh`/`git` can apply labels, create issues, push branches and open pull requests. Shell access is limited to `git`, `gh` and `mise run *`; the web, subagents and arbitrary commands are denied. The shell whitelist also denies `|`, `$`, backticks, `;`, `&`, redirects and literal newlines, so an agent command is one simple command with no `--jq` pipe. Two conventions keep the loop clean:
 
 - **Return the artifact as your final answer — do not also `gh`-comment it.** The action posts your final answer as a comment automatically, so a separate `gh issue comment` narrating a brief or a "spec published" notice duplicates it and fires a second (skipped) run. Use `gh` only for the actual work product — `gh issue create`, `gh issue edit --add-label`, `gh pr create`, `git push` — not for narration.
 - **Subagents are unavailable.** `task` is denied, so `/implement-spec` runs inline in one window instead of parallelising across a frontier. For a multi-ticket spec, prefer `/to-tickets` and per-ticket `/implement`; reserve `/implement-spec` for a genuinely small spec.

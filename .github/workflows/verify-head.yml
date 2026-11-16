@@ -1,0 +1,70 @@
+name: verify-head
+
+# Browser evidence from the exact pull-request head, with a trace artifact.
+# ci.yml runs on push and is the branch gate; this workflow checks out
+# `github.event.pull_request.head.sha` explicitly and records what it verified,
+# so a human can compare the artifact with the PR head before merge.
+#
+# It is deliberately a separate job: no model key is present, and a new push
+# starts a new run whose artifact carries the new SHA. Same-repository PRs only;
+# a fork would run untrusted code in the base repository for no review benefit.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+run-name: "verify-head-pr-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-head-${{ github.event.pull_request.number }}
+  cancel-in-progress: ${{ github.run_attempt == 1 }}
+
+jobs:
+  verify-head:
+    if: |
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout the PR head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Record the checked-out SHA
+        run: |
+          set -euo pipefail
+          actual="$(git rev-parse HEAD)"
+          expected="${{ github.event.pull_request.head.sha }}"
+          printf 'expected=%s\nactual=%s\n' "$expected" "$actual"
+          test "$actual" = "$expected"
+          mkdir -p test-results
+          {
+            echo "PR: ${{ github.event.pull_request.number }}"
+            echo "Expected head SHA: $expected"
+            echo "git rev-parse HEAD: $actual"
+          } > test-results/head-sha.txt
+
+      - uses: jdx/mise-action@6612f0ef07ed2a736cd1e00a94a065522dd41195 # v5.2.5
+
+      - name: Install the pinned toolchain and browser
+        run: mise run setup
+
+      - name: Run the browser suite from the PR head
+        env:
+          PLAYWRIGHT_TRACE: 'on'
+        run: npm run test:e2e
+
+      - name: Upload the browser evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: verify-head-${{ github.event.pull_request.head.sha }}
+          path: test-results/
+          if-no-files-found: warn
+          retention-days: 14

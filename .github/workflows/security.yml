@@ -229,7 +229,13 @@ jobs:
                 "*$*": "deny",
                 "*`*": "deny",
                 "*>*": "deny",
-                "*<*": "deny"
+                "*<*": "deny",
+                "*;*": "deny",
+                "*&&*": "deny",
+                "*&*": "deny",
+                "*|*": "deny",
+                "*\n*": "deny",
+                "*\r*": "deny"
               }
             }
         run: |
@@ -250,8 +256,9 @@ jobs:
 
           Group the advisories by package. For each affected package,
           cross-reference the existing open issues using only these commands,
-          via bash (keep every --jq filter and every title and body free of the
-          characters > and <):
+          via bash. The shell whitelist denies |, $, backticks, ;, &,
+          redirects and newlines; run the commands as written, without pipes or
+          --jq filters:
             gh issue list --state open
             gh issue list --search "<text>"
             gh issue view <number>
