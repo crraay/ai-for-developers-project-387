@@ -269,3 +269,73 @@ default on a public repo). The skills and GitHub Issues conventions the agent fo
 in `.agents/skills/` and `docs/agents/`; the repo-specific commands it may run
 are documented in [AGENTS.md](AGENTS.md).
 
+## Scheduled audits
+
+Two workflows run an audit on a schedule and on demand. The repository's default
+branch is `dev`, so that is the branch the schedules and the manual runs use.
+Both jobs are bounded by `timeout-minutes` and a non-cancelling `concurrency`
+group; neither can change code or open a pull request.
+
+### TODO/FIXME audit
+
+[`todo-fixme-audit.yml`](.github/workflows/todo-fixme-audit.yml) runs daily at
+00:00 UTC+7 (17:00 UTC). It greps hand-written source for TODO, FIXME, HACK,
+XXX and CHANGEME markers, cross-references them with existing issues (open and
+closed), and then:
+
+- saves the report, the agent log, the run URL and the context as the
+  `todo-fixme-audit-<date>` artifact (90 days);
+- posts a one-line run summary — finding count, filed issues and the run link —
+  as a comment on the stable
+  [Scheduled audit reports](https://github.com/crraay/ai-for-developers-project-387/issues?q=label%3Aaudit-report)
+  issue, so the result stays visible after the artifact expires;
+- files one `audit-finding` issue per untracked finding, with the problem, the
+  proposed action, the app name (`Call Calendar`) and the run/report link;
+- searches all issues before filing, so a repeat run with the same finding does
+  not create a duplicate;
+- accepts an optional `training_finding` input on a manual run. The agent files
+  a `training`-labelled issue that says it is not a confirmed application
+  defect, which exercises the issue-writing path without inventing a real bug.
+
+The job asks for `contents: read` and `issues: write`; the `GITHUB_TOKEN` is
+handed to the agent as `GH_TOKEN` (the `use_github_token` path), and the OpenCode
+API key is read only by the quota preflight and the agent step. Reports live in
+the gitignored `.audit/` directory and are never committed.
+
+Results:
+
+| Run | Trigger | Result |
+|---|---|---|
+| [43715322557](https://github.com/crraay/ai-for-developers-project-387/actions/runs/43715322557) | `workflow_dispatch`, `dev`, 2026-11-15 | 0 markers; report artifact `todo-fixme-audit-2026-11-15` |
+| [43988510547](https://github.com/crraay/ai-for-developers-project-387/actions/runs/43988510547) | `schedule`, `dev`, 2026-11-17 | 0 markers; report artifact `todo-fixme-audit-2026-11-17` |
+| [Scheduled audit reports](https://github.com/crraay/ai-for-developers-project-387/issues?q=label%3Aaudit-report) | training and repeat runs | one `training` issue and its run-summary comments; the repeat run reuses the existing issue |
+
+The training verification is deliberately not a defect in the app: the
+`training_finding` input carries prepared text, the issue is labelled
+`training`, and its body says so. A real audit with no markers creates no
+finding issue; it still posts the “0 markers” summary.
+
+### OSV-Scanner audit
+
+[`security.yml`](.github/workflows/security.yml) is the separate weekly lockfile
+audit (Mondays 05:24 UTC). It saves the scanner Markdown, stderr and exit code
+as an artifact, classifies the result as clean, findings, no-packages or
+scanner-error, and on findings asks the agent to file one issue per untracked
+vulnerable package after checking existing issues. The first findings run filed
+[#28](https://github.com/crraay/ai-for-developers-project-387/issues/28) for the
+`js-yaml` advisories; the 2026-11-16 scheduled run found the same three
+advisories already tracked and created no duplicate.
+
+### What I learned
+
+- The schedule is the easy part; durable output is the hard part. An artifact
+  expires and is invisible to the issue tracker, so the run needs a permanent
+  comment and each finding needs a real issue.
+- Deduplication has to include closed issues. A fixed finding would otherwise
+  return as a brand-new task on the next run.
+- A training input is a better demonstration than a fake defect: it proves the
+  write path without polluting the backlog or asking a human to triage an
+  invented bug.
+- The narrow `issues: write` scope and the shell whitelist are enough for this
+  loop. The agent does not need code or pull-request permissions to audit.
+

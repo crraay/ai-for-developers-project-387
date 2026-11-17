@@ -3,28 +3,49 @@ name: todo-fixme-audit
 # Daily audit of TODO/FIXME (and HACK/XXX/CHANGEME) markers. Runs once a day on
 # a schedule (00:00 UTC+7) and on demand via workflow_dispatch.
 #
-# The audit is read-only: the agent greps the tree, cross-references each marker
-# against the existing open issues, and returns a Markdown report. The report is
-# uploaded as a workflow artifact — never committed and never filed as an issue —
-# so a run with no findings still records itself. No code is edited and no pull
-# request is opened.
+# Each run:
+#   - saves the raw data (report, agent log, context) as a workflow artifact;
+#   - publishes a one-line run summary (finding count, filed issues, run link)
+#     as a comment on the stable "Scheduled audit reports" issue;
+#   - files one `audit-finding` issue per untracked finding, with the problem,
+#     the proposed action, the app name and the run/report link.
+#
+# Before filing, the agent searches all existing issues (open and closed), so a
+# repeat run with the same finding does not create a duplicate. A finding that
+# is already covered by an open or closed issue is reported as tracked, not
+# filed again.
+#
+# A manual run may pass `training_finding`. The agent treats that text as an
+# explicitly labelled TRAINING finding, files one `training`-labelled issue,
+# and states in the body that it is not a confirmed application defect. This
+# demonstrates the write path without inventing a real bug in the app.
+#
+# Authorization follows the `use_github_token` path rather than the OpenCode
+# App/OIDC path: the job's GITHUB_TOKEN is handed to the agent as GH_TOKEN and
+# the job asks for `issues: write`, the narrowest scope that can create the
+# finding issues, the run-summary comment and the labels. `contents` stays
+# read-only, so the agent cannot change code, releases or secrets. The model
+# key (OPENCODE_API_KEY) is read only by the provider preflight and the agent
+# step.
 #
 # The pinned github action is not used here: for schedule/workflow_dispatch it
 # checks out a throwaway branch and, when the worktree is dirty, pushes it and
-# opens a PR; otherwise it only logs the answer. That cannot "save the result
-# even without findings". Instead the opencode CLI is installed and run directly
-# (`opencode run`), which writes the final answer to stdout and its own logs to
-# stderr, so the report is captured deterministically.
+# opens a PR; otherwise it only logs the answer. Instead the opencode CLI is
+# installed and run directly (`opencode run`), which writes the final answer to
+# stdout and its own logs to stderr, so the report is captured deterministically.
 #
-# Authorization mirrors opencode.yml: the model key (OPENCODE_API_KEY) is read
-# only by the provider preflight and the agent step; the job's GITHUB_TOKEN
-# stays read-only and is what the agent uses to search issues. No write-capable
-# token is needed, because the report is an artifact, not a commit or an issue.
+# Reports live in the gitignored `.audit/` directory: they are uploaded as an
+# artifact and never committed.
 
 on:
   schedule:
     - cron: "0 17 * * *" # 00:00 UTC+7
   workflow_dispatch:
+    inputs:
+      training_finding:
+        description: "Optional training text; files a labelled training issue, not a real defect"
+        required: false
+        type: string
 
 # Deny every token permission by default; the job asks for the two it needs.
 permissions: {}
@@ -44,7 +65,7 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read # checkout of this repository
-      issues: read # gh issue list / gh search issues in the agent step
+      issues: write # finding issues, the run-summary comment and audit labels
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -81,7 +102,7 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
-          tmp="${RUNNER_TEMP:-/tmp}"
+          mkdir -p .audit
           {
             echo '## TODO/FIXME audit did not run'
             echo
@@ -92,7 +113,7 @@ jobs:
             if [ -n "${QUOTA:-}" ]; then
               echo "- Provider quota: ${QUOTA}"
             fi
-          } | tee "$tmp/report.md" >> "$GITHUB_STEP_SUMMARY"
+          } | tee .audit/report.md >> "$GITHUB_STEP_SUMMARY"
           echo "::warning::${REASON:-the provider quota check did not allow this audit}"
 
       # Same install path as the pinned action, without its event-driven runner.
@@ -103,13 +124,51 @@ jobs:
           curl -fsSL https://opencode.ai/install | bash
           echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
 
+      # Create the labels and the stable report issue once, then leave the run
+      # URL, date and report-issue number in .audit/ for the agent to read. The
+      # agent cannot use shell variables, so the values are files.
+      - name: Prepare the audit context
+        id: context
+        if: steps.preflight.outputs.allowed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TRAINING_FINDING: ${{ inputs.training_finding }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          AUDIT_DATE: ${{ steps.date.outputs.today }}
+        run: |
+          set -euo pipefail
+          mkdir -p .audit
+          printf '%s\n' "$RUN_URL" > .audit/run-url
+          printf '%s\n' "$AUDIT_DATE" > .audit/audit-date
+          if [ -n "${TRAINING_FINDING:-}" ]; then
+            printf '%s\n' "$TRAINING_FINDING" > .audit/training-finding.txt
+          fi
+
+          gh label create audit-finding --color 5319E7 \
+            --description "Finding from a scheduled audit" --force
+          gh label create audit-report --color 0E8A16 \
+            --description "Scheduled audit run reports" --force
+          gh label create training --color FBCA04 \
+            --description "Training demonstration, not a confirmed defect" --force
+
+          report_issue="$(gh issue list --label audit-report --state open --limit 1 \
+            --json number --jq '.[0].number // empty')"
+          if [ -z "$report_issue" ]; then
+            report_url="$(gh issue create --title "Scheduled audit reports" \
+              --label audit-report \
+              --body "Run reports for the scheduled audits. Each run adds one comment with its finding count and run link; each new finding gets its own issue.")"
+            report_issue="${report_url##*/}"
+          fi
+          printf '%s\n' "$report_issue" > .audit/report-issue
+          echo "report-issue=${report_issue}" >> "$GITHUB_OUTPUT"
+
       - name: Audit with OpenCode
         id: agent
         if: steps.preflight.outputs.allowed == 'true'
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
-          # Read-only token for the whitelisted `gh` calls. Naming it GH_TOKEN
-          # is what makes `gh` pick it up; the job's GITHUB_TOKEN cannot write.
+          # The job's GITHUB_TOKEN carries only `issues: write` on top of
+          # `contents: read`. Naming it GH_TOKEN is what makes `gh` pick it up.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Anything that would prompt is denied: a prompt cannot be answered on
           # a runner. Shape is opencode's V1 `permission` object (the installed
@@ -136,6 +195,10 @@ jobs:
                 "gh issue list *": "allow",
                 "gh issue view *": "allow",
                 "gh search issues *": "allow",
+                "gh issue create": "allow",
+                "gh issue create *": "allow",
+                "gh issue comment": "allow",
+                "gh issue comment *": "allow",
                 "*>*": "deny",
                 "*<*": "deny",
                 "*;*": "deny",
@@ -150,69 +213,102 @@ jobs:
             }
         run: |
           set -euo pipefail
-          tmp="${RUNNER_TEMP:-/tmp}"
           opencode run --model opencode-go/deepseek-v4.1-flash \
-            > "$tmp/report.md" 2> "$tmp/agent.log" <<'PROMPT'
+            > .audit/report.md 2> .audit/agent.log <<'PROMPT'
           You are running a scheduled TODO/FIXME audit in this repository. Your
-          job is read-only: produce a Markdown report and nothing else.
+          job is to produce a Markdown report and publish its outcome; do not
+          change code.
+
+          Read these files first with the read tool (relative to the repo root):
+            - .audit/run-url            — the URL of this workflow run.
+            - .audit/audit-date         — the audit date (UTC+7).
+            - .audit/report-issue       — the number of the stable
+                                          "Scheduled audit reports" issue.
+            - .audit/training-finding.txt — present only for the training demo.
 
           A finding is a TODO, FIXME, HACK, XXX or CHANGEME marker that lives in
-          hand-written source. Markers in generated, vendored or build output are
-          skipped, not reported.
+          hand-written source. Markers in generated, vendored or build output
+          are skipped, not reported.
 
           1. Find every finding using the grep tool. Skip generated, vendored
              and build output: node_modules/, frontend/node_modules/, build/,
              dist/, target/, .gradle/, openapi/api.yml, frontend/src/api/,
              .git/, and lockfiles. Skip this workflow file itself if the only
              matches are its own comments.
+
           2. For each finding, note the file, the line and the marker text.
-          3. Cross-reference each finding against the existing issues using only
-             these read commands, via bash. The shell whitelist denies |, $,
-             backticks, ;, &, redirects and newlines; run the commands as
-             written, without pipes or --jq filters:
-               gh issue list --state open
-               gh issue list --search "<text>"
-               gh issue view <number>
-               gh search issues "<text>"
-             A finding is "tracked" when an open issue clearly covers it, and
-             "untracked" otherwise. Do not create or edit any issue.
-          4. Return a Markdown report. The workflow saves your answer as the
-             todo-fixme-audit artifact (nothing is committed):
+
+          3. Cross-reference each finding against the existing issues using
+             only these read commands, via bash. The shell whitelist denies |,
+             $, backticks, ;, &, angle brackets, redirects and newlines; run
+             the commands as written, without pipes or --jq filters:
+               gh issue list --state all
+               gh issue list --state all --search "TEXT"
+               gh issue view NUMBER
+               gh search issues "TEXT"
+             A finding is "tracked" when an existing issue (open or closed)
+             clearly covers it, and "untracked" otherwise. Do not create a
+             second issue for a tracked finding.
+
+          4. For each untracked finding, create ONE issue. Replace every
+             UPPERCASE placeholder with real text and keep the whole command
+             on one line. Strip backticks, angle brackets, dollar signs,
+             semicolons and ampersands from marker text rather than refusing
+             to file the issue:
+               gh issue create --title "Scheduled audit finding: SHORT TITLE" --label audit-finding --body "App: Call Calendar. Problem: WHAT AND WHERE. Proposed action: WHAT A HUMAN SHOULD DO. Report: RUN URL (artifact: todo-fixme-audit-DATE). Filed by the scheduled TODO/FIXME audit. A human decides whether to act on it."
+
+          5. If .audit/training-finding.txt exists and is not empty, treat its
+             content as an explicitly labelled TRAINING finding, not a real
+             defect. Search for an existing issue with the same training text
+             first. If none exists, create ONE issue:
+               gh issue create --title "Training audit finding: SHORT TITLE" --label training --body "TRAINING — not a confirmed application defect. App: Call Calendar. Problem: TRAINING TEXT. Proposed action: demonstrate the audit's issue-filing path. No code change is requested. Report: RUN URL. This issue is a training artifact only."
+             If an issue with the same training text already exists, do not
+             create another one.
+
+          6. Publish the run summary as a comment on the report issue. Replace
+             REPORT_ISSUE with the number from .audit/report-issue, and keep
+             the comment on one line:
+               gh issue comment REPORT_ISSUE --body "TODO/FIXME audit DATE: N markers (tracked T, untracked U). Filed: ISSUE NUMBERS OR none. Result: SHORT OUTCOME. Run: RUN URL"
+             For a zero-finding run use:
+               gh issue comment REPORT_ISSUE --body "TODO/FIXME audit DATE: 0 markers. No new issue. Run: RUN URL"
+
+          7. Return a Markdown report as your final answer:
 
              ## TODO/FIXME audit
              **Markers found:** <n> (tracked: <t>, untracked: <u>)
 
              | File | Line | Marker | Status |
              |---|---|---|---|
-             | path/to/file | 12 | `TODO: ...` | tracked in #123 / untracked |
+             | path/to/file | 12 | `TODO: ...` | tracked in #123 / filed #124 |
 
-             Then a short "Notes" section with anything worth a human's
-             attention.
-
-          If there are no findings at all, return exactly:
+             Then a short "Published" section naming the report-issue comment
+             and every issue you created. If there are no findings at all,
+             return exactly:
 
              ## TODO/FIXME audit
              **Markers found:** 0
 
              No TODO/FIXME/HACK/XXX/CHANGEME markers found in the repository.
 
-          Return only the report as your final answer. Do not edit, write,
-          create or modify any file, issue, pull request or comment, and do not
-          use the web. The report is captured from your answer and uploaded as a
-          workflow artifact.
+          Do not edit, write, create or modify any file, pull request or
+          comment other than the issues and the one report comment described
+          above. Do not use the web.
           PROMPT
-          if [ ! -s "$tmp/report.md" ]; then
-            printf 'No TODO/FIXME markers reported.\n' > "$tmp/report.md"
+          if [ ! -s .audit/report.md ]; then
+            printf 'No TODO/FIXME report produced.\n' > .audit/report.md
           fi
 
-      # The report is an artifact, not a commit or an issue, so no write-capable
-      # token is needed. The denial branch above writes the report when the
-      # provider check stops the run; the agent branch writes it on success.
-      - name: Upload the report artifact
+      # Always upload: the report, the agent log, the run URL and the context
+      # files are the audit's raw data. The upload survives a later step
+      # failure because it is gated on `!cancelled()`, not `success()`.
+      - name: Upload the audit artifact
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: todo-fixme-audit-${{ steps.date.outputs.today }}
-          path: ${{ runner.temp }}/report.md
+          name: todo-fixme-audit-${{ steps.date.outputs.today || 'unknown' }}
+          path: .audit/
+          # `.audit` is a dot-directory; upload-artifact skips hidden paths
+          # unless told otherwise.
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 90

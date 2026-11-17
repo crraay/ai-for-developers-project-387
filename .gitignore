@@ -7,6 +7,9 @@ node_modules/
 # OSV-Scanner audit report captured by the security workflow (CI-only)
 .osv-audit/
 
+# TODO/FIXME audit report, agent log and run context (CI-only)
+.audit/
+
 # Playwright test artifacts
 playwright-report/
 test-results/
