@@ -328,7 +328,8 @@ Results:
 | [43715322557](https://github.com/crraay/ai-for-developers-project-387/actions/runs/43715322557) | `workflow_dispatch`, `dev`, 2026-11-15 | 0 markers; report artifact `todo-fixme-audit-2026-11-15` |
 | [43988510547](https://github.com/crraay/ai-for-developers-project-387/actions/runs/43988510547) | `schedule`, `dev`, 2026-11-17 | 0 markers; report artifact `todo-fixme-audit-2026-11-17` |
 | [44012048988](https://github.com/crraay/ai-for-developers-project-387/actions/runs/44012048988) | `workflow_dispatch` with a training finding, feature branch, 2026-11-17 | filed training issue [#61](https://github.com/crraay/ai-for-developers-project-387/issues/61); posted the run summary on [#60](https://github.com/crraay/ai-for-developers-project-387/issues/60) |
-| [44012257276](https://github.com/crraay/ai-for-developers-project-387/actions/runs/44012257276) | the same training finding again, feature branch, 2026-11-17 | found #61, filed no duplicate; posted the second run summary |
+| [44014702601](https://github.com/crraay/ai-for-developers-project-387/actions/runs/44014702601) | the same training finding on the final PR head, 2026-11-17 | found #61, filed no duplicate; posted the run summary; 0 markers |
+| [44015661927](https://github.com/crraay/ai-for-developers-project-387/actions/runs/44015661927) | the same training finding from `dev`, 2026-11-17 | found #61, filed no duplicate; posted the run summary; 0 markers |
 
 The training verification is deliberately not a defect in the app: the
 `training_finding` input carries prepared text, issue #61 is labelled
