@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 const script = fileURLToPath(new URL('./check-commits.mjs', import.meta.url));
 
-function newRepo(t) {
+function newRepo(t, { withBase = true } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'check-commits-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   execFileSync('git', ['init', '-q', '-b', 'dev'], { cwd: dir });
@@ -17,7 +17,9 @@ function newRepo(t) {
   writeFileSync(join(dir, 'seed.txt'), 'seed');
   execFileSync('git', ['add', '.'], { cwd: dir });
   execFileSync('git', ['commit', '-q', '-m', 'chore: seed'], { cwd: dir });
-  execFileSync('git', ['update-ref', 'refs/remotes/origin/dev', 'HEAD'], { cwd: dir });
+  if (withBase) {
+    execFileSync('git', ['update-ref', 'refs/remotes/origin/dev', 'HEAD'], { cwd: dir });
+  }
   return dir;
 }
 
@@ -44,6 +46,13 @@ test('skips when there are no commits ahead of the base', (t) => {
 
   assert.equal(result.status, 0);
   assert.match(result.stdout, /no commits ahead/);
+});
+
+test('skips when the base ref is unavailable', (t) => {
+  const result = run(newRepo(t, { withBase: false }));
+
+  assert.equal(result.status, 0);
+  assert.match(result.stdout, /not available; skipping/);
 });
 
 test('fails a commit whose body line is longer than 100 characters', (t) => {

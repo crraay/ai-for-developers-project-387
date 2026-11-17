@@ -314,8 +314,14 @@ jobs:
       # summary commit (when the worktree was dirty) is not conventional and is
       # skipped. A line comment runs on an existing PR, whose title is usually
       # already valid, so this is a no-op there.
+      #
+      # Best effort: the agent already succeeded and the PR exists, so a failed
+      # rename must not turn the run into `agent_failed` (the report job keys on
+      # the opencode job failing). The root dependencies are installed here
+      # because a fresh runner has no node_modules unless the agent ran setup.
       - name: Normalise an auto-created pull request title
         if: ${{ !cancelled() && steps.agent.outcome == 'success' }}
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.app-token }}
           REPO: ${{ github.repository }}
@@ -337,8 +343,12 @@ jobs:
           fi
           cli="node_modules/@commitlint/cli/cli.js"
           if [ ! -f "$cli" ]; then
-            echo "commitlint is not installed; leaving PR #$number unchanged."
-            exit 0
+            echo "Installing the root dependencies for the title check..."
+            npm ci --ignore-scripts
+          fi
+          if [ ! -f "$cli" ]; then
+            echo "::warning::commitlint is still missing; leaving PR #$number unchanged."
+            exit 1
           fi
           title="$(gh pr view "$number" --repo "$REPO" --json title --jq .title)"
           if printf '%s\n' "$title" | node "$cli" >/dev/null 2>&1; then
@@ -351,7 +361,7 @@ jobs:
               subject="$candidate"
               break
             fi
-          done <<< "$(git log --format=%s -n 20)"
+          done <<< "$(gh pr view "$number" --repo "$REPO" --json commits --jq '.commits[].messageHeadline')"
           if [ -z "$subject" ]; then
             echo "::warning::PR #$number has no conventional commit subject to use as a title."
             exit 0
