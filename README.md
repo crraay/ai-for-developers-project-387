@@ -244,7 +244,22 @@ is `opencode-go/deepseek-v4.1-flash`; the API key lives in the
 comment (and, for a line comment, moves it into that line's thread).
 A companion workflow,
 [`.github/workflows/opencode-review.yml`](.github/workflows/opencode-review.yml),
-reviews each non-draft PR authored by the owner or the agent bot. A third,
+reviews each non-draft PR authored by the owner or the agent bot; drafts,
+forks, `release-please--` branches, dependabot and `agent-paused` PRs are
+skipped. It runs on `pull_request` (`opened`, `synchronize`, `reopened`,
+`ready_for_review`), declares `permissions: {}` and grants each job only the
+scopes it needs: `preflight` reads contents and actions; `review` reads
+contents, pull requests, issues, checks, statuses and actions and gets
+`id-token: write` for the App-token exchange; `refuse` gets `issues: write`
+to post its model-free comment; `report` reads contents and actions and gets
+`issues: write` to inspect the failed step and post the report. The agent gets
+a read-only `GH_TOKEN` and shell whitelist, and the review is posted through
+the App token.
+The jobs time out after 5 minutes
+(`preflight`, `refuse`, `report`) or 15 minutes (`review`), and a per-PR
+concurrency group cancels a review superseded by a new push. The review is
+**advisory** — not a required check — and follows `REVIEW.md` plus
+[docs/agents/review.md](docs/agents/review.md). A third,
 [`.github/workflows/opencode-triage.yml`](.github/workflows/opencode-triage.yml),
 triages each newly opened issue: it runs on `issues: [opened]`, skips bot
 authors and any issue already carrying a triage state label, and asks the agent
@@ -263,9 +278,11 @@ semantics, including why a re-run consumes another attempt and why
 `timeout-minutes` is not a budget, are in
 [docs/agents/agent-runs.md](docs/agents/agent-runs.md).
 
-Agent sessions are **not shared**: all three workflows set `share: "false"` so a
-run's transcript is never published (the action would otherwise share it by
-default on a public repo). The skills and GitHub Issues conventions the agent follows live
-in `.agents/skills/` and `docs/agents/`; the repo-specific commands it may run
-are documented in [AGENTS.md](AGENTS.md).
+Session sharing is disabled where the action is used: the command workflow
+runs the pinned action with `share: "false"`. The review and triage workflows
+do not use the action at all — they run `opencode run` and print the answer to
+stdout, so the action's default sharing path is never used. The skills and
+GitHub Issues conventions the agent follows live in `.agents/skills/` and
+`docs/agents/`; the repo-specific commands it may run are documented in
+[AGENTS.md](AGENTS.md).
 
