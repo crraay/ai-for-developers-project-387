@@ -361,7 +361,7 @@ jobs:
               subject="$candidate"
               break
             fi
-          done <<< "$(gh pr view "$number" --repo "$REPO" --json commits --jq '.commits[].messageHeadline')"
+          done <<< "$(gh pr view "$number" --repo "$REPO" --json commits --jq '[.commits[].messageHeadline] | reverse | .[]')"
           if [ -z "$subject" ]; then
             echo "::warning::PR #$number has no conventional commit subject to use as a title."
             exit 0
