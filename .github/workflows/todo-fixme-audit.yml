@@ -154,14 +154,15 @@ jobs:
           gh label create training --color FBCA04 \
             --description "Training demonstration, not a confirmed defect" --force
 
-          # Reuse the issue by its exact title, not by label alone: a second
-          # labelled issue or a closed report issue must not silently move the
-          # run summaries. Reopen a closed report issue before commenting.
+          # Reuse the report issue by its exact title AND the audit-report
+          # label. The label is the write gate: a public account cannot add it,
+          # so a same-titled issue cannot hijack the run summaries. Reopen the
+          # issue if it was closed before commenting.
           report_issue="$(gh issue list --state all --limit 10 \
             --label audit-report \
             --search "Scheduled audit reports in:title" \
-            --json number,title,author \
-            --jq '[.[] | select(.title == "Scheduled audit reports" and .author.login == "github-actions[bot]")][0].number // empty')"
+            --json number,title \
+            --jq '[.[] | select(.title == "Scheduled audit reports")][0].number // empty')"
           if [ -z "$report_issue" ]; then
             report_url="$(gh issue create --title "Scheduled audit reports" \
               --label audit-report \
