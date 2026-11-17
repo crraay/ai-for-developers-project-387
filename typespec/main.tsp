@@ -16,6 +16,7 @@ using TypeSpec.OpenAPI;
   #{ name: "booking-types", description: "Host-defined booking types the guest picks" },
   #{ name: "host-bookings", description: "Host-only booking operations" },
   #{ name: "host-settings", description: "Public host settings" },
+  #{ name: "host-availability", description: "Host-managed recurring availability windows" },
 ])
 namespace CallCalendar;
 
@@ -96,6 +97,21 @@ model UpdateBookingTypeRequest {
   active: boolean;
 }
 
+@doc("A host-managed weekly availability window. `daysOfWeek` holds RFC 5545 day codes (MO…SU), deduplicated and ordered Monday-to-Sunday; `startTime`/`endTime` are host-local HH:mm wall-clock times with `endTime` strictly after `startTime` on the same day (a window never crosses midnight).")
+model RecurringWindowResponse {
+  id: int64;
+  daysOfWeek: string[];
+  startTime: string;
+  endTime: string;
+}
+
+@doc("Body of POST/PUT /api/host/recurring-windows. Fields are nullable because input is untrusted.")
+model RecurringWindowRequest {
+  daysOfWeek: string[];
+  startTime: string;
+  endTime: string;
+}
+
 // ---------------------------------------------------------------------------
 // Common response types
 // ---------------------------------------------------------------------------
@@ -159,6 +175,20 @@ model HostBookingNotFound {
 @doc("Type deleted, or hidden when existing bookings still reference it so their label survives")
 model DeleteBookingTypeResponse {
   @statusCode statusCode: 204;
+}
+
+@doc("Empty or unknown days, malformed times, or an end time not after the start time (a window may not cross midnight)")
+model RecurringWindowBadRequest {
+  @statusCode statusCode: 400;
+  @header contentType: "application/problem+json";
+  @body body: ProblemDetail;
+}
+
+@doc("No recurring window with this id")
+model RecurringWindowNotFound {
+  @statusCode statusCode: 404;
+  @header contentType: "application/problem+json";
+  @body body: ProblemDetail;
 }
 
 // ---------------------------------------------------------------------------
@@ -236,6 +266,29 @@ model UpdateBookingTypeResponse {
 model CancelBookingByIdResponse {
   @statusCode statusCode: 200;
   @body body: HostBookingResponse;
+}
+
+@doc("Every recurring window, ordered by id ascending")
+model ListRecurringWindowsResponse {
+  @statusCode statusCode: 200;
+  @body body: RecurringWindowResponse[];
+}
+
+@doc("The created recurring window")
+model CreateRecurringWindowResponse {
+  @statusCode statusCode: 201;
+  @body body: RecurringWindowResponse;
+}
+
+@doc("The updated recurring window")
+model UpdateRecurringWindowResponse {
+  @statusCode statusCode: 200;
+  @body body: RecurringWindowResponse;
+}
+
+@doc("Window deleted")
+model DeleteRecurringWindowResponse {
+  @statusCode statusCode: 204;
 }
 
 // ---------------------------------------------------------------------------
@@ -338,6 +391,39 @@ interface BookingTypes {
   deleteBookingType(
     @path id: int64,
   ): DeleteBookingTypeResponse | BookingTypeNotFound;
+}
+
+@tag("host-availability")
+@route("/api/host/recurring-windows")
+interface RecurringWindows {
+  @summary("List recurring availability windows")
+  @operationId("listRecurringWindows")
+  @get
+  listRecurringWindows(): ListRecurringWindowsResponse;
+
+  @summary("Create a recurring availability window")
+  @operationId("createRecurringWindow")
+  @post
+  createRecurringWindow(
+    @body body: RecurringWindowRequest,
+  ): CreateRecurringWindowResponse | RecurringWindowBadRequest;
+
+  @summary("Update a recurring availability window")
+  @operationId("updateRecurringWindow")
+  @put
+  @route("/{id}")
+  updateRecurringWindow(
+    @path id: int64,
+    @body body: RecurringWindowRequest,
+  ): UpdateRecurringWindowResponse | RecurringWindowBadRequest | RecurringWindowNotFound;
+
+  @summary("Delete a recurring availability window")
+  @operationId("deleteRecurringWindow")
+  @delete
+  @route("/{id}")
+  deleteRecurringWindow(
+    @path id: int64,
+  ): DeleteRecurringWindowResponse | RecurringWindowNotFound;
 }
 
 @tag("host-bookings")

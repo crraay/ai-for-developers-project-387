@@ -86,6 +86,25 @@ export type ProblemDetail = {
 };
 
 /**
+ * Body of POST/PUT /api/host/recurring-windows. Fields are nullable because input is untrusted.
+ */
+export type RecurringWindowRequest = {
+  daysOfWeek: Array<string>;
+  startTime: string;
+  endTime: string;
+};
+
+/**
+ * A host-managed weekly availability window. `daysOfWeek` holds RFC 5545 day codes (MO…SU), deduplicated and ordered Monday-to-Sunday; `startTime`/`endTime` are host-local HH:mm wall-clock times with `endTime` strictly after `startTime` on the same day (a window never crosses midnight).
+ */
+export type RecurringWindowResponse = {
+  id: number;
+  daysOfWeek: Array<string>;
+  startTime: string;
+  endTime: string;
+};
+
+/**
  * Body of PUT /api/host/booking-types/{id}. `sortOrder` and `active` are host-only bookkeeping fields, so the host can move the type to the top of the picker or hide it without creating / deleting.
  */
 export type UpdateBookingTypeRequest = {
@@ -366,6 +385,112 @@ export type CancelBookingByIdResponses = {
 
 export type CancelBookingByIdResponse =
   CancelBookingByIdResponses[keyof CancelBookingByIdResponses];
+
+export type ListRecurringWindowsData = {
+  body?: never;
+  path?: never;
+  query?: never;
+  url: '/api/host/recurring-windows';
+};
+
+export type ListRecurringWindowsResponses = {
+  /**
+   * Every recurring window, ordered by id ascending
+   */
+  200: Array<RecurringWindowResponse>;
+};
+
+export type ListRecurringWindowsResponse =
+  ListRecurringWindowsResponses[keyof ListRecurringWindowsResponses];
+
+export type CreateRecurringWindowData = {
+  body: RecurringWindowRequest;
+  path?: never;
+  query?: never;
+  url: '/api/host/recurring-windows';
+};
+
+export type CreateRecurringWindowErrors = {
+  /**
+   * Empty or unknown days, malformed times, or an end time not after the start time (a window may not cross midnight)
+   */
+  400: ProblemDetail;
+};
+
+export type CreateRecurringWindowError =
+  CreateRecurringWindowErrors[keyof CreateRecurringWindowErrors];
+
+export type CreateRecurringWindowResponses = {
+  /**
+   * The created recurring window
+   */
+  201: RecurringWindowResponse;
+};
+
+export type CreateRecurringWindowResponse =
+  CreateRecurringWindowResponses[keyof CreateRecurringWindowResponses];
+
+export type DeleteRecurringWindowData = {
+  body?: never;
+  path: {
+    id: number;
+  };
+  query?: never;
+  url: '/api/host/recurring-windows/{id}';
+};
+
+export type DeleteRecurringWindowErrors = {
+  /**
+   * No recurring window with this id
+   */
+  404: ProblemDetail;
+};
+
+export type DeleteRecurringWindowError =
+  DeleteRecurringWindowErrors[keyof DeleteRecurringWindowErrors];
+
+export type DeleteRecurringWindowResponses = {
+  /**
+   * Window deleted
+   */
+  204: void;
+};
+
+export type DeleteRecurringWindowResponse =
+  DeleteRecurringWindowResponses[keyof DeleteRecurringWindowResponses];
+
+export type UpdateRecurringWindowData = {
+  body: RecurringWindowRequest;
+  path: {
+    id: number;
+  };
+  query?: never;
+  url: '/api/host/recurring-windows/{id}';
+};
+
+export type UpdateRecurringWindowErrors = {
+  /**
+   * Empty or unknown days, malformed times, or an end time not after the start time (a window may not cross midnight)
+   */
+  400: ProblemDetail;
+  /**
+   * No recurring window with this id
+   */
+  404: ProblemDetail;
+};
+
+export type UpdateRecurringWindowError =
+  UpdateRecurringWindowErrors[keyof UpdateRecurringWindowErrors];
+
+export type UpdateRecurringWindowResponses = {
+  /**
+   * The updated recurring window
+   */
+  200: RecurringWindowResponse;
+};
+
+export type UpdateRecurringWindowResponse =
+  UpdateRecurringWindowResponses[keyof UpdateRecurringWindowResponses];
 
 export type PingData = {
   body?: never;

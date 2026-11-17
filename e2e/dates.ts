@@ -70,6 +70,24 @@ export function firstWeekdayAfter(dateString: string): string {
 }
 
 /**
+ * Returns a future Saturday at least `minDays` out and inside the 14-day window,
+ * formatted as yyyy-mm-dd in the given IANA timezone. Weekday is pure calendar
+ * arithmetic on the date string, so no timezone conversion is involved.
+ */
+export function futureSaturdayDate(timeZone: string, minDays = 2): string {
+  const today = formatDateInTimeZone(new Date(), timeZone);
+  for (let offset = minDays; offset <= 13; offset++) {
+    const candidate = addDaysToDateString(today, offset);
+    const [year, month, day] = candidate.split('-').map(Number);
+    if (new Date(Date.UTC(year, month - 1, day)).getUTCDay() === 6) {
+      return candidate;
+    }
+  }
+  /* c8 ignore next -- a 12-day span always contains a Saturday */
+  throw new Error(`no Saturday inside the booking window after ${today}`);
+}
+
+/**
  * Returns a future weekday (Mon-Fri) at least `minDays` out, formatted as
  * yyyy-mm-dd in the given IANA timezone. The booking window is 14 calendar days
  * including today, so staying well inside it keeps the slot bookable.
