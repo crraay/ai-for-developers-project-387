@@ -286,6 +286,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       issues: write # post the reason on the PR; this job has no model key
+      pull-requests: write # a PR comment is rejected with issues: write alone
     steps:
       - name: Post the refusal
         env:
@@ -346,6 +347,7 @@ jobs:
       contents: read # checkout of the report script
       actions: read # inspect the review job's failed step
       issues: write # post the reason on the PR
+      pull-requests: write # a PR comment is rejected with issues: write alone
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
