@@ -3,12 +3,15 @@ name: todo-fixme-audit
 # Daily audit of TODO/FIXME (and HACK/XXX/CHANGEME) markers. Runs once a day on
 # a schedule (00:00 UTC+7) and on demand via workflow_dispatch.
 #
-# Each run:
+# Each agent run:
 #   - saves the raw data (report, agent log, context) as a workflow artifact;
 #   - publishes a one-line run summary (finding count, filed issues, run link)
 #     as a comment on the stable "Scheduled audit reports" issue;
 #   - files one `audit-finding` issue per untracked finding, with the problem,
 #     the proposed action, the app name and the run/report link.
+#
+# A provider-refused run records the refusal in the artifact and the job
+# summary instead of calling the agent.
 #
 # Before filing, the agent searches all existing issues (open and closed), so a
 # repeat run with the same finding does not create a duplicate. A finding that
@@ -155,9 +158,10 @@ jobs:
           # labelled issue or a closed report issue must not silently move the
           # run summaries. Reopen a closed report issue before commenting.
           report_issue="$(gh issue list --state all --limit 10 \
+            --label audit-report \
             --search "Scheduled audit reports in:title" \
-            --json number,title \
-            --jq '[.[] | select(.title == "Scheduled audit reports")][0].number // empty')"
+            --json number,title,author \
+            --jq '[.[] | select(.title == "Scheduled audit reports" and .author.login == "github-actions[bot]")][0].number // empty')"
           if [ -z "$report_issue" ]; then
             report_url="$(gh issue create --title "Scheduled audit reports" \
               --label audit-report \
@@ -174,7 +178,7 @@ jobs:
 
       - name: Audit with OpenCode
         id: agent
-        if: steps.preflight.outputs.allowed == 'true'
+        if: steps.preflight.outputs.allowed == 'true' && steps.context.outcome == 'success'
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           # The job's GITHUB_TOKEN carries only `issues: write` on top of
@@ -253,40 +257,42 @@ jobs:
 
           3. Cross-reference each finding against the existing issues using
              only these read commands, via bash. The shell whitelist denies |,
-             $, backticks, ;, &, angle brackets, double quotes, backslashes,
-             redirects and newlines; run the commands as written, without
-             pipes or --jq filters:
+             $, backticks, ;, &, angle brackets, redirects and newlines. Run
+             the commands as written, without pipes or --jq filters. The
+             surrounding double quotes are part of the command and are
+             allowed; the text inside them must follow the text rule below:
                gh issue list --state all
                gh issue list --state all --search "TEXT"
                gh issue view NUMBER
                gh search issues "TEXT"
              Use a short plain search token (letters, digits, spaces and
-             hyphens) in TEXT, not the raw marker text. A finding is "tracked"
-             when an existing issue (open or closed) clearly covers it, and
-             "untracked" otherwise. Do not create a second issue for a tracked
-             finding.
+             hyphens) in TEXT, not the raw marker text, and never pass a
+             multi-word TEXT unquoted. A finding is "tracked" when an existing
+             issue (open or closed) clearly covers it, and "untracked"
+             otherwise. Do not create a second issue for a tracked finding.
+
+          Text rule for every title, body, search token and summary you pass
+          to gh: replace |, $, backticks, ;, &, <, >, double quotes,
+          backslashes and newlines with spaces. Keep the surrounding command
+          quotes; they are part of the command and are allowed.
 
           4. For each untracked finding, create ONE issue. Replace every
-             UPPERCASE placeholder with real text and keep the whole command
-             on one line. Strip backticks, angle brackets, dollar signs,
-             semicolons, ampersands, pipes, double quotes, backslashes and
-             newlines from marker text (replace them with spaces) rather than
-             refusing to file the issue:
+             UPPERCASE placeholder with real text, apply the text rule to the
+             title and body, and keep the whole command on one line:
                gh issue create --title "Scheduled audit finding: SHORT TITLE" --label audit-finding --body "App: Call Calendar. Problem: WHAT AND WHERE. Proposed action: WHAT A HUMAN SHOULD DO. Report: RUN URL (artifact: todo-fixme-audit-DATE). Filed by the scheduled TODO/FIXME audit. A human decides whether to act on it."
 
           5. If .audit/training-finding.txt exists and is not empty, treat its
              content as an explicitly labelled TRAINING finding, not a real
              defect. Search with a short plain token from the training text
-             first, and apply the same character rules to the body. If no
+             first, and apply the text rule to the title and body. If no
              matching issue exists, create ONE issue:
                gh issue create --title "Training audit finding: SHORT TITLE" --label training --body "TRAINING — not a confirmed application defect. App: Call Calendar. Problem: TRAINING TEXT. Proposed action: demonstrate the audit's issue-filing path. No code change is requested. Report: RUN URL. This issue is a training artifact only."
              If an issue with the same training text already exists, do not
              create another one.
 
           6. Publish the run summary as a comment on the report issue. Replace
-             REPORT_ISSUE with the number from .audit/report-issue, and keep
-             the comment on one line, free of pipes, double quotes,
-             backslashes and newlines:
+             REPORT_ISSUE with the number from .audit/report-issue, apply the
+             text rule to the summary, and keep the comment on one line:
                gh issue comment REPORT_ISSUE --body "TODO/FIXME audit DATE: N markers (tracked T, untracked U). Filed: ISSUE NUMBERS OR none. Result: SHORT OUTCOME. Run: RUN URL"
              For a zero-finding run use:
                gh issue comment REPORT_ISSUE --body "TODO/FIXME audit DATE: 0 markers. No new issue. Run: RUN URL"

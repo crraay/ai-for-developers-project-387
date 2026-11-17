@@ -281,7 +281,7 @@ group; neither can change code or open a pull request.
 [`todo-fixme-audit.yml`](.github/workflows/todo-fixme-audit.yml) runs daily at
 00:00 UTC+7 (17:00 UTC). It greps hand-written source for TODO, FIXME, HACK,
 XXX and CHANGEME markers, cross-references them with existing issues (open and
-closed), and then:
+closed). When the agent runs, it:
 
 - saves the report, the agent log, the run URL and the context as the
   `todo-fixme-audit-<date>` artifact (90 days);
@@ -300,7 +300,9 @@ closed), and then:
 The job asks for `contents: read` and `issues: write`; the `GITHUB_TOKEN` is
 handed to the agent as `GH_TOKEN` (the `use_github_token` path), and the OpenCode
 API key is read only by the quota preflight and the agent step. Reports live in
-the gitignored `.audit/` directory and are never committed.
+the gitignored `.audit/` directory and are never committed. A provider-refused
+run records the refusal in the artifact and the job summary instead of calling
+the agent.
 
 Results:
 
