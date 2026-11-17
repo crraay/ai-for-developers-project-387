@@ -250,9 +250,11 @@ skipped. It runs on `pull_request` (`opened`, `synchronize`, `reopened`,
 `ready_for_review`), declares `permissions: {}` and grants each job only the
 scopes it needs: `preflight` reads contents and actions; `review` reads
 contents, pull requests, issues, checks, statuses and actions and gets
-`id-token: write` for the App-token exchange; `refuse` gets `issues: write`
-to post its model-free comment; `report` reads contents and actions and gets
-`issues: write` to inspect the failed step and post the report. The agent gets
+`id-token: write` for the App-token exchange; `refuse` and `report` get
+`issues: write` and `pull-requests: write` to post their model-free comments
+on issues and pull requests (a PR comment is rejected with `issues: write`
+alone); `report` also reads contents and actions to inspect the failed step.
+The agent gets
 a read-only `GH_TOKEN` and shell whitelist, and the review is posted through
 the App token.
 The jobs time out after 5 minutes
