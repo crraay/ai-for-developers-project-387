@@ -328,14 +328,15 @@ Results:
 | [43715322557](https://github.com/crraay/ai-for-developers-project-387/actions/runs/43715322557) | `workflow_dispatch`, `dev`, 2026-11-15 | 0 markers; report artifact `todo-fixme-audit-2026-11-15` |
 | [43988510547](https://github.com/crraay/ai-for-developers-project-387/actions/runs/43988510547) | `schedule`, `dev`, 2026-11-17 | 0 markers; report artifact `todo-fixme-audit-2026-11-17` |
 | [44012048988](https://github.com/crraay/ai-for-developers-project-387/actions/runs/44012048988) | `workflow_dispatch` with a training finding, feature branch, 2026-11-17 | filed training issue [#61](https://github.com/crraay/ai-for-developers-project-387/issues/61); posted the run summary on [#60](https://github.com/crraay/ai-for-developers-project-387/issues/60) |
-| [44014702601](https://github.com/crraay/ai-for-developers-project-387/actions/runs/44014702601) | the same training finding on the final PR head, 2026-11-17 | found #61, filed no duplicate; posted the run summary; 0 markers |
-| [44015661927](https://github.com/crraay/ai-for-developers-project-387/actions/runs/44015661927) | the same training finding from `dev`, 2026-11-17 | found #61, filed no duplicate; posted the run summary; 0 markers |
+| [44016934095](https://github.com/crraay/ai-for-developers-project-387/actions/runs/44016934095) | `workflow_dispatch` with a fresh training finding, `dev`, 2026-11-17 | filed training issue [#68](https://github.com/crraay/ai-for-developers-project-387/issues/68); posted the run summary on [#60](https://github.com/crraay/ai-for-developers-project-387/issues/60) |
+| [44017138574](https://github.com/crraay/ai-for-developers-project-387/actions/runs/44017138574) | the same training finding again, `dev`, 2026-11-17 | found #68, filed no duplicate; posted the run summary; 0 markers |
 
 The training verification is deliberately not a defect in the app: the
-`training_finding` input carries prepared text, issue #61 is labelled
-`training`, and its body says it is not a confirmed application defect. A real
-audit with no markers creates no finding issue; it still posts the “0 markers”
-summary.
+`training_finding` input carries prepared text, and issues #61 and #68 are
+labelled `training` with a body that says they are not confirmed application
+defects. #61 was the first demo on the feature branch; #68 was created by the
+`dev` run above, and the repeat `dev` run reused it. A real audit with no
+markers creates no finding issue; it still posts the “0 markers” summary.
 
 ### OSV-Scanner audit
 
