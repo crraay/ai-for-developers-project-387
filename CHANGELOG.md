@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.5.0](https://github.com/crraay/ai-for-developers-project-387/compare/v0.4.1...v0.5.0) (2026-11-17)
+
+
+### Features
+
+* **host:** manage recurring availability windows ([9761d99](https://github.com/crraay/ai-for-developers-project-387/commit/9761d99f258986b259f102a2f5c7ece457b9a449))
+* **host:** manage recurring availability windows ([24b0159](https://github.com/crraay/ai-for-developers-project-387/commit/24b015990de7f91f37bd2bab1b0d94867f85bf39)), closes [#49](https://github.com/crraay/ai-for-developers-project-387/issues/49) [#50](https://github.com/crraay/ai-for-developers-project-387/issues/50) [#51](https://github.com/crraay/ai-for-developers-project-387/issues/51) [#52](https://github.com/crraay/ai-for-developers-project-387/issues/52) [#53](https://github.com/crraay/ai-for-developers-project-387/issues/53)
+
+
+### Bug Fixes
+
+* **agent:** address the gate PR review findings ([a806148](https://github.com/crraay/ai-for-developers-project-387/commit/a8061481f06a417cb613c8d00f9be22ea3477ce5)), closes [#47](https://github.com/crraay/ai-for-developers-project-387/issues/47)
+* **agent:** bind triage writes to the event issue ([f05499d](https://github.com/crraay/ai-for-developers-project-387/commit/f05499d936818020570bc671ff926d47741a851e)), closes [#47](https://github.com/crraay/ai-for-developers-project-387/issues/47)
+* **agent:** close the second review round ([8de4d95](https://github.com/crraay/ai-for-developers-project-387/commit/8de4d95850251ebccce53ee860c6735568e24cad)), closes [#47](https://github.com/crraay/ai-for-developers-project-387/issues/47)
+* **agent:** do not report superseded reviews and keep one reason code ([eb12df3](https://github.com/crraay/ai-for-developers-project-387/commit/eb12df323b6334dc9da054c8e682f10faeb481e8)), closes [#47](https://github.com/crraay/ai-for-developers-project-387/issues/47)
+* **agent:** harden the PR title normaliser ([f614bf5](https://github.com/crraay/ai-for-developers-project-387/commit/f614bf5af0a1bc66beee772f39972e2289cf6ee7)), closes [#55](https://github.com/crraay/ai-for-developers-project-387/issues/55)
+* **agent:** let refusal comments post on pull requests ([58f1a88](https://github.com/crraay/ai-for-developers-project-387/commit/58f1a88cddfa9c7efb3e2df54aa80f6e2f0e2e42))
+* **agent:** let refusal comments post on pull requests ([a00a877](https://github.com/crraay/ai-for-developers-project-387/commit/a00a877a3bbeb5252c8bcd02718308f892688423)), closes [#65](https://github.com/crraay/ai-for-developers-project-387/issues/65)
+* **agent:** pick the newest PR title subject ([2356c6c](https://github.com/crraay/ai-for-developers-project-387/commit/2356c6c69847c5c26b8006199d6b662532c4979e)), closes [#55](https://github.com/crraay/ai-for-developers-project-387/issues/55)
+* **audit:** gate the agent and align the text guards ([39f1fed](https://github.com/crraay/ai-for-developers-project-387/commit/39f1fedcfe0e0bb3606bf850d96f3dbc53da1884)), closes [#57](https://github.com/crraay/ai-for-developers-project-387/issues/57)
+* **audit:** keep the report issue lookup label-scoped ([e1f3fd1](https://github.com/crraay/ai-for-developers-project-387/commit/e1f3fd107c65249164e21db0394de331bcd784a9)), closes [#57](https://github.com/crraay/ai-for-developers-project-387/issues/57)
+* **audit:** pin the report issue and harden the prompt ([f411fdf](https://github.com/crraay/ai-for-developers-project-387/commit/f411fdfd94665b1b986a1266fd4f161743a9bbfa)), closes [#57](https://github.com/crraay/ai-for-developers-project-387/issues/57)
+* **ci:** migrate triage off the flaky opencode action ([1c8a24b](https://github.com/crraay/ai-for-developers-project-387/commit/1c8a24b152ac8d19bac130a8bbdca3c1fecb8d01))
+* **ci:** migrate triage off the flaky opencode action ([2e8d797](https://github.com/crraay/ai-for-developers-project-387/commit/2e8d79734a173b84429193bf54b931b7ee872a23)), closes [#40](https://github.com/crraay/ai-for-developers-project-387/issues/40)
+* **ci:** run the required title check on every PR head ([0849e2b](https://github.com/crraay/ai-for-developers-project-387/commit/0849e2be26970e2a242c6ba1efd423dff618fdd0))
+* **host:** close delete dialog after a successful delete ([ed35af2](https://github.com/crraay/ai-for-developers-project-387/commit/ed35af293f7902d8316f667ef7bbb3520e2f1573)), closes [#49](https://github.com/crraay/ai-for-developers-project-387/issues/49)
+
 ## [0.4.1](https://github.com/crraay/ai-for-developers-project-387/compare/v0.4.0...v0.4.1) (2026-11-15)
 
 
