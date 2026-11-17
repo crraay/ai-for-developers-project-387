@@ -4,7 +4,9 @@
 
 ### Commits
 
-Commit messages follow [Conventional Commits](https://www.conventionalcommits.org) — enforced by `commitlint.config.mjs` (commit-msg hk hook) and CI (`commitlint` runs over the pushed range). PR titles follow the same ruleset: `pr-title.yml` pipes the title through `commitlint`, so a title without `type(scope):` fails CI even when every commit is fine. An agent that opens a PR must use a `type(scope):` title (the `/pr` skill produces one) — never a sentence title like `Widened host bookings table; all checks pass.`
+Commit messages follow [Conventional Commits](https://www.conventionalcommits.org) — `mise run check:commits` (part of `mise run check`) lints the commits ahead of the base branch, and CI also runs `commitlint` over the pushed range. Keep every body line at 100 characters or fewer (`body-max-line-length`) and put `Refs #N` / `Closes #N` in their own footer paragraph after a blank line: a long `-m` paragraph fails the gate, and an inline `Refs #54` is not a trailer. The `hk` commit-msg hook (`hk install --mise`, once per clone) gives the same feedback at commit time, but `mise run setup` does not install it and it is not a substitute for the gate.
+
+PR titles follow the same ruleset: `pr-title.yml` pipes the title through `commitlint`, so a title without `type(scope):` fails CI even when every commit is fine. The pinned action creates an implement PR from the agent's final message, so `opencode.yml` rewrites a non-conventional auto-created title to the newest conventional commit subject; the agent still owns the body and must fill the template with `gh pr edit --body-file`. Never use a sentence title like `Widened host bookings table; all checks pass.`
 
 Commits and PRs reference their ticket. `Refs #<n>` in the commit body points at the issue the change works on; `Closes #<n>` in the PR description closes it once the acceptance criteria are met; `Part of #<map>` covers work bundled under a decision map (see `docs/agents/issue-tracker.md`). An implementation commit without a referenceable issue is an exception — raise it with a human before merging.
 

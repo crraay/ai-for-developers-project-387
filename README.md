@@ -176,6 +176,11 @@ gate). It needs Docker for the browser test:
 mise run check
 ```
 
+`mise run check` also lints the commits ahead of the default branch
+(`check:commits`), so a non-conventional message fails the same gate as the
+code. The hook below is still worth installing for immediate feedback at
+commit time.
+
 Other tasks:
 
 ```bash
