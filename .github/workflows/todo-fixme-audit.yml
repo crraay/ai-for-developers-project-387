@@ -151,13 +151,23 @@ jobs:
           gh label create training --color FBCA04 \
             --description "Training demonstration, not a confirmed defect" --force
 
-          report_issue="$(gh issue list --label audit-report --state open --limit 1 \
-            --json number --jq '.[0].number // empty')"
+          # Reuse the issue by its exact title, not by label alone: a second
+          # labelled issue or a closed report issue must not silently move the
+          # run summaries. Reopen a closed report issue before commenting.
+          report_issue="$(gh issue list --state all --limit 10 \
+            --search "Scheduled audit reports in:title" \
+            --json number,title \
+            --jq '[.[] | select(.title == "Scheduled audit reports")][0].number // empty')"
           if [ -z "$report_issue" ]; then
             report_url="$(gh issue create --title "Scheduled audit reports" \
               --label audit-report \
               --body "Run reports for the scheduled audits. Each run adds one comment with its finding count and run link; each new finding gets its own issue.")"
             report_issue="${report_url##*/}"
+          else
+            report_state="$(gh issue view "$report_issue" --json state --jq .state)"
+            if [ "$report_state" = "CLOSED" ]; then
+              gh issue reopen "$report_issue"
+            fi
           fi
           printf '%s\n' "$report_issue" > .audit/report-issue
           echo "report-issue=${report_issue}" >> "$GITHUB_OUTPUT"
@@ -227,8 +237,11 @@ jobs:
             - .audit/training-finding.txt — present only for the training demo.
 
           A finding is a TODO, FIXME, HACK, XXX or CHANGEME marker that lives in
-          hand-written source. Markers in generated, vendored or build output
-          are skipped, not reported.
+          hand-written source and reads like a task note or code comment, for
+          example a source comment that starts with TODO: or FIXME:. A sentence
+          in documentation that merely lists the marker names, a table heading,
+          or this prompt is not a finding. Markers in generated, vendored or
+          build output are skipped, not reported.
 
           1. Find every finding using the grep tool. Skip generated, vendored
              and build output: node_modules/, frontend/node_modules/, build/,
@@ -240,34 +253,40 @@ jobs:
 
           3. Cross-reference each finding against the existing issues using
              only these read commands, via bash. The shell whitelist denies |,
-             $, backticks, ;, &, angle brackets, redirects and newlines; run
-             the commands as written, without pipes or --jq filters:
+             $, backticks, ;, &, angle brackets, double quotes, backslashes,
+             redirects and newlines; run the commands as written, without
+             pipes or --jq filters:
                gh issue list --state all
                gh issue list --state all --search "TEXT"
                gh issue view NUMBER
                gh search issues "TEXT"
-             A finding is "tracked" when an existing issue (open or closed)
-             clearly covers it, and "untracked" otherwise. Do not create a
-             second issue for a tracked finding.
+             Use a short plain search token (letters, digits, spaces and
+             hyphens) in TEXT, not the raw marker text. A finding is "tracked"
+             when an existing issue (open or closed) clearly covers it, and
+             "untracked" otherwise. Do not create a second issue for a tracked
+             finding.
 
           4. For each untracked finding, create ONE issue. Replace every
              UPPERCASE placeholder with real text and keep the whole command
              on one line. Strip backticks, angle brackets, dollar signs,
-             semicolons and ampersands from marker text rather than refusing
-             to file the issue:
+             semicolons, ampersands, pipes, double quotes, backslashes and
+             newlines from marker text (replace them with spaces) rather than
+             refusing to file the issue:
                gh issue create --title "Scheduled audit finding: SHORT TITLE" --label audit-finding --body "App: Call Calendar. Problem: WHAT AND WHERE. Proposed action: WHAT A HUMAN SHOULD DO. Report: RUN URL (artifact: todo-fixme-audit-DATE). Filed by the scheduled TODO/FIXME audit. A human decides whether to act on it."
 
           5. If .audit/training-finding.txt exists and is not empty, treat its
              content as an explicitly labelled TRAINING finding, not a real
-             defect. Search for an existing issue with the same training text
-             first. If none exists, create ONE issue:
+             defect. Search with a short plain token from the training text
+             first, and apply the same character rules to the body. If no
+             matching issue exists, create ONE issue:
                gh issue create --title "Training audit finding: SHORT TITLE" --label training --body "TRAINING — not a confirmed application defect. App: Call Calendar. Problem: TRAINING TEXT. Proposed action: demonstrate the audit's issue-filing path. No code change is requested. Report: RUN URL. This issue is a training artifact only."
              If an issue with the same training text already exists, do not
              create another one.
 
           6. Publish the run summary as a comment on the report issue. Replace
              REPORT_ISSUE with the number from .audit/report-issue, and keep
-             the comment on one line:
+             the comment on one line, free of pipes, double quotes,
+             backslashes and newlines:
                gh issue comment REPORT_ISSUE --body "TODO/FIXME audit DATE: N markers (tracked T, untracked U). Filed: ISSUE NUMBERS OR none. Result: SHORT OUTCOME. Run: RUN URL"
              For a zero-finding run use:
                gh issue comment REPORT_ISSUE --body "TODO/FIXME audit DATE: 0 markers. No new issue. Run: RUN URL"
